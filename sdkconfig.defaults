@@ -1,0 +1,9 @@
+# Zigbee requires a 1000Hz tick rate
+CONFIG_FREERTOS_HZ=1000
+
+# Increase main task stack size for Zigbee initialization
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192
+
+# Enable the Zigbee stack and radio
+CONFIG_ZB_ENABLED=y
+CONFIG_ZB_ZCZR=y

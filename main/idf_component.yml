@@ -1,0 +1,5 @@
+dependencies:
+  espressif/esp-zigbee-lib: "^1.6.8"
+  espressif/esp-zboss-lib: "*"
+  idf:
+    version: ">=5.3"

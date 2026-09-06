@@ -1,0 +1,24 @@
+.pio
+
+# ESP-IDF build output
+build/
+ 
+# Auto-downloaded component manager dependencies (regenerated from
+# idf_component.yml + dependencies.lock - don't need to be committed)
+managed_components/
+ 
+# Per-machine ESP-IDF config cache / logs
+sdkconfig.old
+.mypy_cache/
+ 
+# Editor/IDE
+.vscode/
+.idea/
+ 
+# NixOS / direnv, if you set up a flake devShell for this project
+.direnv/
+result
+result-*
+ 
+# OS noise
+.DS_Store
