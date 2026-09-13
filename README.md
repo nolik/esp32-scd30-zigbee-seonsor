@@ -169,12 +169,75 @@ No output here is fine (means no error); an explicit `Failed to load external
 converter` or `EACCES ... symlink` error means the folder/ownership steps
 above weren't applied correctly - fix and restart again.
 
-**After the converter loads successfully, still click "Reconfigure" on the
-device's page in the Z2M frontend once.** Loading the converter alone doesn't
-re-run its `configure()` step (which sets up the actual attribute
-binding/reporting) on an already-paired device - only a fresh pairing or a
-manual Reconfigure does. Skipping this shows some fields (e.g. temperature,
-linkquality) as stuck/`null` even though the converter is technically active.
+Occasionally a device's `configure()` (bind + reporting setup) can fail on a
+given boot due to ordinary one-shot radio packet loss - see Step 6 for what
+that looked like during development and why it's rare now that the real
+underlying bug (also Step 6) is fixed.
+
+---
+
+## 6. The temperature-stuck-at-null bug (fixed) and polling (tried, removed)
+
+**This was the real, root-caused bug**, found via Zigbee2MQTT debug-level
+logging (`advanced.log_level: debug` + `DEBUG=zigbee-herdsman:*`) capturing
+the actual over-the-air frames rather than just summary log lines:
+
+At boot, all four clusters (CO2, temperature, humidity, on/off) successfully
+send their *first* attribute report - proving binding/reporting genuinely
+works, contrary to what the symptom looked like. CO2 and humidity later send
+a **second** report once self-heal completes, correctly reflecting their real
+values. **Temperature never sent a second report, ever** - in any capture,
+across many reboots.
+
+Root cause: temperature's original placeholder was `(int16_t)0x8000`
+(`-32768`) - the ZCL-defined "invalid" sentinel, and also the most extreme
+possible value a signed 16-bit number can hold. The jump from that placeholder
+to a real reading (e.g. `2073` = 20.73C) is a delta of ~34841, which itself
+overflows signed 16-bit arithmetic (max +32767). If the reporting engine's
+"has this changed enough to report?" check computes that delta using 16-bit
+signed math, the overflow can silently produce a wrong (too-small) result,
+permanently convincing it nothing worth reporting ever happened again. CO2
+(a float) and humidity (unsigned, whose placeholder sits at a safer point in
+its own range) don't hit this edge case. `-32768` was also, on reflection,
+outside the cluster's own declared valid range (`-4000` to `8500`) - a second
+reason it was a bad choice.
+
+**Fix applied**: temperature's placeholder is now `0` (0.00C) instead of
+`0x8000` - safely within the declared range, and no delta calculation
+involving it can overflow. Cosmetic tradeoff: during the ~2 minute self-heal
+window, temperature briefly shows `0.00C` instead of `null`/unavailable -
+minor, and self-corrects automatically once the first real reading lands.
+
+A one-time diagnostic (`log_attribute_reporting_flags()` in `main.cpp`,
+logged once at boot as `Attr check [...]`) confirmed all four attributes
+correctly carry the ZCL `REPORTING` access flag, ruling out a simpler
+"attribute not marked reportable" explanation before the real cause was found.
+
+### Polling (tried during development, removed)
+
+A 60-second polling safety net (`onEvent` in the converter) was added while
+debugging, as defense against occasional one-shot bind failures (see below).
+Once the actual root cause was found and fixed, testing confirmed push-based
+reporting alone is reliable, so polling was **removed** to keep the converter
+simple - pure `configure()` (bind + reporting) is the current, final setup.
+
+If a future symptom looks like "occasional single-cluster reporting hiccup on
+some reboot" again, re-adding an `onEvent` poll loop (reading each cluster's
+`measuredValue` every 60s) is a reasonable fallback to reach for - it's cheap,
+harmless, and was proven to work during development. Rationale for why it
+would help: bind is a **one-shot** ZDO operation (a single request/reply that
+never automatically retries if lost), unlike reads, which are **repeating**
+(a lost one just retries next cycle with no consequence) - so a bind hiccup
+is structurally more fragile than a comparable read/report hiccup, even
+though both face the same ordinary radio-level packet loss.
+
+### Manual reconfigure (rarely needed)
+
+To nudge the efficient push path back on for a specific device: MQTT publish
+`{"id": "CO2 sensor"}` (or the IEEE address) to
+`zigbee2mqtt/bridge/request/device/configure` - this is exactly what the
+frontend's Reconfigure button does. Not required for correctness, only for
+the (nice-to-have) lower-latency push behavior.
 
 ---
 
@@ -194,7 +257,9 @@ linkquality) as stuck/`null` even though the converter is technically active.
 | FRC succeeds (`OK` logged) but reverts after a real power cycle | Same defect as above - contradicts Sensirion's own documented persistence behavior | Self-heal mechanism re-asserts FRC automatically every boot from ESP32 NVS |
 | Z2M shows "Unsupported" / "Automatically generated definition" despite installing the converter | Wrong folder (needs `external_converters/` subfolder, not the data dir root) | See Step 5 |
 | `EACCES ... symlink 'node_modules'` in Z2M log | The `external_converters/` directory itself is root-owned | `chown -R` the *directory*, not just the `.js` file, to the `zigbee2mqtt` service user |
-| Converter loads, device shows correct model, but still says "Unsupported" / fields stuck at placeholder values (co2: 400, temperature: null) | `configure()` hasn't run for this already-paired device yet | Click **Reconfigure** on the device page in Z2M once |
+| Converter loads, device shows correct model, but still says "Unsupported" / fields stuck at placeholder values right after installing the converter | `configure()` hasn't run for this already-paired device yet | Click **Reconfigure** on the device page in Z2M once |
+| Temperature specifically stuck at `null` forever after boot, while CO2/humidity update fine | **Fixed** - was a signed 16-bit overflow in the reporting engine's delta check, triggered by the old `-32768` placeholder. See Step 6 | Temperature's placeholder changed to `0` in `main.cpp` - don't revert to `0x8000` |
+| Any single field occasionally stuck after a specific reboot (rare now that the Step 6 bug is fixed) | A one-shot ZDO Bind Request can occasionally fail on ordinary radio packet loss (confirmed once via `AREQ - ZDO - bindRsp after 10000ms`) | Click Reconfigure once; consider re-adding the `onEvent` polling pattern from Step 6 if this becomes frequent |
 | Breath test shows only a small CO2 rise (e.g. 400 -> 560 ppm) | Expected - exhaled breath (~40,000+ ppm) is heavily diluted by room air before reaching the sensor, and the sensor has a ~20s response time | Not a sign of inaccuracy; use FRC against a genuine known reference to judge real accuracy, not a breath test |
 
 ---
@@ -210,3 +275,4 @@ linkquality) as stuck/`null` even though the converter is technically active.
 | `SCD30_FRC_MIN_PPM` / `MAX_PPM` (400-2000) | FRC command's own documented valid input range |
 | `SCD30_PLAUSIBLE_MIN_PPM` / `MAX_PPM` (300-10000) | Sanity bounds for self-heal save/reassert, matching the sensor's accuracy-guaranteed range |
 | `SCD30_SAVE_INTERVAL_READINGS` (20, ~5 min) | How often a trusted live reading updates the self-heal reference in NVS |
+| Temperature placeholder (`0` in `temp_cfg`) | Fixed from `0x8000` - see Step 6 for why; don't revert |

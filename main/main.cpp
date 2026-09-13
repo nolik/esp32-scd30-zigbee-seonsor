@@ -508,6 +508,32 @@ static esp_err_t zb_action_handler(esp_zb_core_action_callback_id_t callback_id,
     return ret;
 }
 
+// One-time diagnostic, per Espressif's own attribute-reporting debugging checklist:
+// verify each attribute actually carries the REPORTING access flag. If one is
+// missing it, the device will never honor a Configure Reporting request for it,
+// no matter how many times Z2M retries - this would explain a deterministic,
+// repeatable failure rather than random per-boot bad luck.
+static void log_attribute_reporting_flags() {
+    struct { uint16_t cluster_id; uint16_t attr_id; const char *name; } checks[] = {
+        {ESP_ZB_ZCL_CLUSTER_ID_CARBON_DIOXIDE_MEASUREMENT, ESP_ZB_ZCL_ATTR_CARBON_DIOXIDE_MEASUREMENT_MEASURED_VALUE_ID, "CO2"},
+        {ESP_ZB_ZCL_CLUSTER_ID_TEMP_MEASUREMENT, ESP_ZB_ZCL_ATTR_TEMP_MEASUREMENT_VALUE_ID, "Temperature"},
+        {ESP_ZB_ZCL_CLUSTER_ID_REL_HUMIDITY_MEASUREMENT, ESP_ZB_ZCL_ATTR_REL_HUMIDITY_MEASUREMENT_VALUE_ID, "Humidity"},
+        {ESP_ZB_ZCL_CLUSTER_ID_ON_OFF, ESP_ZB_ZCL_ATTR_ON_OFF_ON_OFF_ID, "OnOff"},
+    };
+
+    for (auto &c : checks) {
+        esp_zb_zcl_attr_t *attr = esp_zb_zcl_get_attribute(ZIGBEE_ENDPOINT, c.cluster_id,
+                                                            ESP_ZB_ZCL_CLUSTER_SERVER_ROLE, c.attr_id);
+        if (!attr) {
+            ESP_LOGE(TAG, "Attr check [%s]: not found!", c.name);
+            continue;
+        }
+        bool reportable = (attr->access & ESP_ZB_ZCL_ATTR_ACCESS_REPORTING) != 0;
+        ESP_LOGW(TAG, "Attr check [%s]: access=0x%02x, REPORTING flag %s",
+                 c.name, attr->access, reportable ? "SET" : "MISSING");
+    }
+}
+
 void esp_zb_app_signal_handler(esp_zb_app_signal_t *signal_struct) {
     uint32_t *p_sg_p = signal_struct->p_app_signal;
     esp_err_t err_status = signal_struct->esp_err_status;
@@ -587,7 +613,16 @@ void zigbee_task(void *pvParameters) {
     };
 
     esp_zb_temperature_meas_cluster_cfg_t temp_cfg = {
-        .measured_value = (int16_t)0x8000, // 0x8000 = "invalid/not yet measured" per ZCL spec
+        // Was (int16_t)0x8000 (-32768, the ZCL "invalid" sentinel) - but that sits at
+        // the extreme edge of int16 range. The jump from -32768 to a real reading
+        // (e.g. 2073 = 20.73C) computes as a delta of ~34841, which itself overflows
+        // signed 16-bit arithmetic. If the reporting engine's "has this changed
+        // enough" check uses 16-bit signed math, that overflow can make it wrongly
+        // conclude "not changed enough" - silently preventing any report ever again
+        // after the first one. Using 0 avoids the overflow entirely and stays safely
+        // within our declared min/max (-4000 to 8500) below, unlike -32768 which was
+        // actually outside that declared range.
+        .measured_value = 0, // 0.00 C placeholder until the first real reading lands
         .min_value = -4000,                // -40.00 C
         .max_value = 8500,                 // 85.00 C
     };
@@ -617,6 +652,7 @@ void zigbee_task(void *pvParameters) {
 
     esp_zb_device_register(ep_list);
     esp_zb_core_action_handler_register(zb_action_handler);
+    log_attribute_reporting_flags();
 
     esp_zb_set_primary_network_channel_set(ESP_ZB_PRIMARY_CHANNEL_MASK);
 
