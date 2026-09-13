@@ -58,7 +58,7 @@
 #define SCD30_CAL_NVS_NAMESPACE "scd30_cal"
 #define SCD30_CAL_NVS_KEY "last_co2"
 #define SCD30_SELF_HEAL_WAIT_MS (120 * 1000) // Sensirion requires >=2 min stable readings before FRC
-#define SCD30_SAVE_INTERVAL_READINGS 20       // ~5 min at the 15s interval above
+#define SCD30_SAVE_INTERVAL_READINGS 40      // ~10 min at the 15s interval above
 
 // FRC command's documented valid range - clamp any reference (manual or self-healed)
 // to this before sending, since indoor CO2 can exceed it in poorly-ventilated rooms.
