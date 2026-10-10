@@ -187,6 +187,11 @@ impl<S: Scd30, St: StoredReference, R: Reporter, C: Clock> SensorService<S, St, 
             }
         }
         self.read_and_report();
+        if let Recalibration::Settling { due_ms } = self.recalibration {
+            if self.clock.now_ms() >= due_ms {
+                self.finish_reference_recalibration();
+            }
+        }
     }
 
     fn read_and_report(&mut self) {
@@ -239,6 +244,52 @@ impl<S: Scd30, St: StoredReference, R: Reporter, C: Clock> SensorService<S, St, 
             self.sensor.recover_bus();
             self.consecutive_failures = 0;
         }
+    }
+
+    /// Zigbee "Trigger Recalibration" switch turned on: reference FRC per Sensirion -
+    /// 2 s interval, 2 minutes of measurements, FRC to 425 ppm, back to 15 s.
+    pub fn request_reference_recalibration(&mut self) -> bool {
+        if self.recalibration != Recalibration::Idle {
+            log::warn!("Recalibration already in progress - ignoring trigger");
+            return false;
+        }
+        log::info!("Recalibration triggered via Zigbee");
+        if self.self_heal_pending() {
+            // The user is exposing the sensor to a real reference; don't also re-assert the
+            // stale NVS value two minutes into it.
+            log::warn!("Reference Recalibration supersedes the pending Self-Heal");
+            self.self_heal = SelfHeal::Inactive;
+        }
+        log::warn!("Zigbee-triggered FRC: waiting 2 minutes at 2 s interval for stable readings...");
+        self.retry("SCD30 set_measurement_interval (FRC)", |s| {
+            s.write_setting(Setting::MeasurementInterval, FRC_INTERVAL_S)
+        });
+        self.recalibration = Recalibration::Settling { due_ms: self.clock.now_ms() + SELF_HEAL_WAIT_MS };
+        true
+    }
+
+    fn finish_reference_recalibration(&mut self) {
+        self.recalibration = Recalibration::Idle;
+        let reference = FRC_REFERENCE_PPM;
+        let result = self.sensor.force_recalibration(reference);
+        self.discard_next_reading = true; // Post-FRC Transient
+        self.clock.sleep_ms(COMMAND_GAP_MS);
+        self.retry("SCD30 set_measurement_interval (normal)", |s| {
+            s.write_setting(Setting::MeasurementInterval, MEASUREMENT_INTERVAL_S)
+        });
+        match result {
+            Ok(()) => {
+                log::warn!("Zigbee-triggered FRC to {reference} ppm: OK");
+                self.trusted_session = true; // Q4 (deliberate change from the C++ firmware)
+                if self.store.save(i32::from(reference)) {
+                    log::info!("Saved {reference} ppm as new self-heal reference");
+                } else {
+                    log::warn!("Failed to save self-heal reference to NVS");
+                }
+            }
+            Err(e) => log::error!("Zigbee-triggered FRC FAILED ({e:?})"),
+        }
+        self.reporter.reset_recalibration_switch();
     }
 }
 
