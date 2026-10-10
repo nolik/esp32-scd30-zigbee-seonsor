@@ -1,6 +1,7 @@
 mod clock;
 mod sensor_hw;
 mod store;
+mod zb;
 
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
 use std::time::Duration;
@@ -24,10 +25,11 @@ fn main() -> anyhow::Result<()> {
     esp_idf_svc::sys::link_patches();
     esp_idf_svc::log::EspLogger::initialize_default();
 
+    // NVS before the Zigbee platform config (avoids "phy_init: NVS has not been initialized").
     let nvs = EspDefaultNvsPartition::take()?;
     let (recal_tx, recal_rx) = mpsc::channel::<()>();
-    let sensor_thread = run_sensor(nvs, LogReporter, recal_rx)?;
-    let _keep_frc_sender_alive = recal_tx; // Task 11 hands it to the Zigbee module
+    zb::start(recal_tx)?;
+    let sensor_thread = run_sensor(nvs, LogReporter, recal_rx)?; // Task 10 swaps in ZigbeeReporter
     sensor_thread.join().map_err(|_| anyhow::anyhow!("sensor thread panicked"))?;
     Ok(())
 }
@@ -65,7 +67,3 @@ fn run_sensor(
         }
     })?)
 }
-
-/// ZBOSS requires the application to define this symbol; Task 9 replaces it with the real one.
-#[no_mangle]
-pub extern "C" fn esp_zb_app_signal_handler(_signal: *mut esp_idf_svc::sys::zb::esp_zb_app_signal_t) {}
