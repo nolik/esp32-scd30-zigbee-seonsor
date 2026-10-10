@@ -15,7 +15,9 @@ fn main() -> anyhow::Result<()> {
     esp_idf_svc::log::EspLogger::initialize_default();
 
     // NVS before the Zigbee platform config (avoids "phy_init: NVS has not been initialized").
-    let nvs = EspDefaultNvsPartition::take()?;
+    // take_with(false): never auto-erase NVS on init errors - it holds the Stored Reference
+    // (and the defective SCD30 reads ~1 ppm without it). Fail loudly instead, like the C++ firmware.
+    let nvs = EspDefaultNvsPartition::take_with(false)?;
     let (recal_tx, recal_rx) = mpsc::channel::<()>();
     zb::start(recal_tx)?;
     let sensor_thread = run_sensor(nvs, zb::ZigbeeReporter, recal_rx)?;
