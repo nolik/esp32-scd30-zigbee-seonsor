@@ -1,5 +1,10 @@
 # ESP32-C6 + SCD30 Zigbee CO2/Temperature/Humidity Sensor
 
+> **Repository layout:** `firmware/` (ESP-IDF `std` Rust, Zigbee via ZBOSS FFI) + `logic/`
+> (hardware-free, host-tested) are the firmware. `legacy-cpp/` is the previous C++ firmware, kept for
+> rollback (tag `cpp-final`) until the soak completes. Glossary: `CONTEXT.md`; decisions:
+> `docs/rust-migration.md`, `docs/adr/`.
+
 DIY Zigbee end device built on ESP-IDF, exposing CO2 (SCD30, NDIR), temperature,
 humidity, and a "Trigger Recalibration" switch to Zigbee2MQTT / Home Assistant.
 
@@ -13,126 +18,81 @@ humidity, and a "Trigger Recalibration" switch to Zigbee2MQTT / Home Assistant.
 
 ---
 
-## 0. One-time environment setup (fresh NixOS install)
+## 0. Environment (NixOS build host)
 
-Check which port the board enumerates as:
+Everything (Rust nightly, ESP-IDF v5.3.3, `espflash`, `ldproxy`, `mosquitto`, `jq`) is pinned in
+`flake.nix`/`flake.lock`:
 ```
-ls /dev/tty*
+nix --experimental-features 'nix-command flakes' develop
 ```
-If it's `/dev/ttyACM0`, fix permissions for this session:
-```
-sudo chmod 666 /dev/ttyACM0
-```
-(or add your user to the `dialout` group permanently via NixOS config, which
-survives reboots).
-
-Enter the ESP-IDF dev shell (nixpkgs has no plain `esp-idf` package - this uses
-the community `nixpkgs-esp-dev` flake, targeting the C6):
-```
-nix --experimental-features 'nix-command flakes' develop github:mirrexagon/nixpkgs-esp-dev#esp32c6-idf
-```
-(`esp-idf-full` also works and covers all targets, at the cost of a larger download.)
+The ESP32-C6 shows up as
+`/dev/serial/by-id/usb-Espressif_USB_JTAG_serial_debug_unit_A0:F2:62:45:CE:34-if00` (the
+`ttyACM` number changes). Each re-plug resets its permissions: `sudo chmod 666 /dev/ttyACM*`, or
+add your user to the `dialout` group. **Never point tools at `/dev/ttyUSB0` - that is the
+Zigbee2MQTT coordinator.**
 
 ---
 
 ## 1. Build
 
 ```
-idf.py set-target esp32c6      # only needed once, or after a full clean
-idf.py build
+cd firmware && cargo build --release     # first build compiles ESP-IDF (~10+ min)
+cd logic && cargo test                    # host tests for the sensor logic (any machine)
 ```
-
-Watch for these two build-time gotchas (see Troubleshooting if hit):
-- `driver/i2c_master.h: No such file or directory` -> missing `driver` in
-  `CMakeLists.txt`'s `REQUIRES`.
-- `'ESP_ZB_DEFAULT_RADIO_CONFIG' was not declared` / `'DEFINE_PSTRING' was not
-  declared` -> these SDK macros aren't auto-included by `esp_zigbee_core.h` in
-  this SDK version; already worked around locally in `main.cpp` (see comments
-  there) - don't re-add the SDK's own macro definitions on top.
 
 ---
 
-## 2. Partition table (required before first flash)
+## 2. Partition table
 
-The Zigbee stack needs its own NVM partitions (`zb_storage`, `zb_fct`) beyond
-the default table. `partitions.csv` in this repo already defines them:
-```
-# Name,      Type, SubType, Offset,   Size,  Flags
-nvs,         data, nvs,     0x9000,   0x6000,
-phy_init,    data, phy,     0xf000,   0x1000,
-factory,     app,  factory, 0x10000,  0x100000,
-zb_storage,  data, fat,     0x110000, 16K,
-zb_fct,      data, fat,     0x114000, 4K,
-```
-Confirm it's actually wired up: `idf.py menuconfig` -> **Partition Table** ->
-must be set to **Custom partition table CSV**, filename `partitions.csv`. If
-it shows "Single factory app, no OTA" instead, select the custom option, save,
-then `idf.py fullclean && idf.py build`.
-
-You'll know this is wrong if the boot log's partition table only lists 3
-entries (`nvs`, `phy_init`, `factory`) instead of 5 - and you'll see a
-`zb_assert()` abort shortly after `esp_zb_init()` runs.
+`firmware/partitions.csv` keeps the C++ firmware's data-partition offsets so the Zigbee pairing
+(`zb_storage`) and the Stored Reference (`nvs`) survive firmware swaps; the app moved to
+`factory @ 0x120000` (2 MB) and the old 1 MB app area is deliberately unused
+([ADR 0002](docs/adr/0002-partition-layout-keeps-old-offsets.md)). The boot log must list 5
+partitions with `factory` at `0x00120000`.
 
 ---
 
 ## 3. Flash
 
-With monitor, for troubleshooting boot/join/sensor issues:
 ```
-idf.py -p /dev/ttyACM0 flash monitor
+./scripts/flash.sh            # bootloader + partition table + app
+./scripts/flash.sh --monitor  # same, then serial monitor (needs an interactive terminal)
 ```
-(Ctrl+] to exit the monitor.)
-
-Once things look good, plain flash is fine:
-```
-idf.py -p /dev/ttyACM0 flash
-```
+**Never erase flash** (`espflash erase-flash`, `--erase-parts`): it destroys the pairing and the
+Stored Reference. Rollback to C++: `legacy-cpp/README.md` (tag `cpp-final`); it reads the same
+Stored Reference.
 
 ---
 
-## 4. First boot: seed the self-heal calibration reference
+## 4. Calibration: Self-Heal and Reference Recalibration
 
-**This SCD30 unit has a confirmed hardware defect**: its Forced Recalibration
-(FRC) value does not survive a real power cycle, even though Sensirion's own
-datasheet says it should. Re-verified with controlled power-cut tests on
-2026-10-10 (ASC off, Sensirion's 2 s FRC procedure, every other NVM setting
-persisting) - see [`docs/scd30-defect-evidence.md`](docs/scd30-defect-evidence.md).
-The firmware works around this with a *self-heal*
-mechanism (stores the last trusted CO2 reading in the ESP32's own NVS flash,
-which - unlike the SCD30's NVM - reliably survives power loss, and reasserts
-it via FRC on every boot). But NVS starts empty, so it needs seeding once:
+Terms are defined in [`CONTEXT.md`](CONTEXT.md).
 
-1. In `main.cpp`, set `SCD30_PERFORM_FRC` to `true`. Take the device outside
-   (or right by an open window with good airflow).
-2. `idf.py build && idf.py -p /dev/ttyACM0 flash monitor` while outdoors. Wait
-   for the `Forced recalibration to ... ppm: OK` and `Saved ... ppm as new
-   self-heal reference` log lines.
-3. Set `SCD30_PERFORM_FRC` back to `false`, reflash. From here on, every boot
-   self-heals automatically - no more manual outdoor trips needed for normal
-   operation.
+**This SCD30 unit has a confirmed hardware defect** (bought on AliExpress, authenticity
+unverified): it loses its FRC calibration on every power cycle, even though Sensirion's datasheet
+says it shouldn't, and then reads ~1 ppm. Verified with controlled power-cut tests on 2026-10-10
+(ASC off, Sensirion's 2 s FRC procedure, every other sensor setting persisting) - see
+[`docs/scd30-defect-evidence.md`](docs/scd30-defect-evidence.md).
 
-`SCD30_FRC_REFERENCE_PPM` (currently `425`) is the assumed outdoor CO2
-baseline - this drifts a few ppm per year (was ~420 a couple years ago); worth
-a quick check if redoing this far in the future.
+The firmware compensates with **Self-Heal**: the last trusted CO2 reading is kept as the **Stored
+Reference** in ESP32 NVS (saved every ~5 min during a Trusted Session) and re-applied via FRC two
+minutes after every boot; readings are not reported until then. With a good replacement sensor,
+build with `--no-default-features` to disable Self-Heal.
 
-ASC (automatic self-calibration) is kept **permanently off**: the boot-time FRC
-always overrides it on this unit, so running both only lets them fight. The
-firmware reads the ASC state at boot and writes it off only if found on.
+A fresh board (empty NVS) needs one **Reference Recalibration**: put the sensor at an open window
+(fresh outdoor air, still in Zigbee range) for a few minutes and flip the **Trigger Recalibration**
+switch in Home Assistant/Zigbee2MQTT. The firmware switches the sensor to a 2 s Measurement
+Interval, waits 2 minutes, applies FRC = 425 ppm (`FRC_REFERENCE_PPM`, drifts a few ppm per year),
+returns to 15 s, saves the Stored Reference and resets the switch to off.
 
-Measurement interval: the sensor runs at **15 s** normally. A **manual reference FRC**
-(Zigbee switch or `SCD30_PERFORM_FRC` seeding) follows Sensirion's procedure: switch to
-2 s, 2 minutes of measurements, FRC, back to 15 s. The **boot self-heal FRC stays at
-15 s**: on this unit any interval change shifts CO2 by ~7 ppm (measured 2026-10-10, 10
-switches against 5 s and 15 s), and the self-heal replays a value measured at 15 s -
-doing it at 2 s would push readings ~7 ppm lower on every reboot. Consequence of the
-2 s manual FRC: afterwards the 15 s readings sit ~7 ppm below the reference (constant,
-well inside the +-30 ppm spec). The sensor's temperature offset
-(`SCD30_TEMPERATURE_OFFSET_CENTI_C`, also corrects humidity) is set for 15 s operation.
-
-You can also trigger a fresh FRC any time from Home Assistant/Zigbee2MQTT
-(see below) instead of editing/reflashing - flip the exposed **Trigger
-Recalibration** switch on while the sensor is exposed to a known reference; it
-resets itself off automatically once done.
+- ASC (automatic self-calibration) is kept **permanently off**: the boot-time FRC always overrides
+  it on this unit. Interval (15 s), ASC (off) and temperature offset (320) are read at boot and
+  written only if different.
+- Self-Heal stays at the 15 s interval while Reference Recalibration uses 2 s: any interval change
+  shifts CO2 by ~7 ppm on this unit, and a 2 s Self-Heal would push readings ~7 ppm lower on every
+  reboot ([ADR 0003](docs/adr/0003-self-heal-at-15s-reference-recalibration-at-2s.md)). After a
+  Reference Recalibration, 15 s readings sit ~7 ppm below 425 (constant, inside the ±30 ppm spec).
+- The one ~1 ppm reading the sensor produces right after any FRC (Post-FRC Transient) is discarded.
 
 ---
 
@@ -221,7 +181,7 @@ involving it can overflow. Cosmetic tradeoff: during the ~2 minute self-heal
 window, temperature briefly shows `0.00C` instead of `null`/unavailable -
 minor, and self-corrects automatically once the first real reading lands.
 
-A one-time diagnostic (`log_attribute_reporting_flags()` in `main.cpp`,
+A one-time diagnostic in the C++ firmware (`log_attribute_reporting_flags()` in `legacy-cpp/main/main.cpp`,
 logged once at boot as `Attr check [...]`) confirmed all four attributes
 correctly carry the ZCL `REPORTING` access flag, ruling out a simpler
 "attribute not marked reportable" explanation before the real cause was found.
@@ -258,36 +218,38 @@ the (nice-to-have) lower-latency push behavior.
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| `driver/i2c_master.h: No such file or directory` | Missing `driver` in `CMakeLists.txt` `REQUIRES` | Add `driver` to the `REQUIRES` list |
-| `'ESP_ZB_DEFAULT_RADIO_CONFIG' was not declared` | Not auto-included by `esp_zigbee_core.h` in this SDK version | Already defined locally in `main.cpp` - don't remove |
-| `'DEFINE_PSTRING' was not declared` | Same as above, lives in a header not pulled in | Manufacturer/model strings are built as raw Pascal-string byte arrays instead - see `main.cpp` |
-| Narrowing conversion errors on cluster `measured_value` | Different clusters use different signedness (temperature = `int16_t`, humidity = `uint16_t`) per ZCL spec | Match the cast to each cluster's actual field type |
-| `zb_assert()` / abort right after boot, partition table shows only 3 entries | Custom partition table not actually active | See Step 2 above |
-| `phy_init: NVS has not been initialized` warning | Missing `nvs_flash_init()` | Already called in `app_main()` - don't remove |
+| `zb_assert()` / abort right after boot, boot log doesn't show 5 partitions with `factory` at `0x00120000` | Partition table not flashed | `scripts/flash.sh` passes `--partition-table`; see Step 2 |
+| `phy_init: NVS has not been initialized` warning | NVS taken after the Zigbee platform config | `main` takes `EspDefaultNvsPartition` before `zb::start` - keep that order |
 | Steering keeps failing (`status: -1` repeatedly) | Channel mask too narrow, or permit join not enabled on the coordinator | Use `ESP_ZB_TRANSCEIVER_ALL_CHANNELS_MASK`; enable permit join in Z2M |
-| `clear bus failed` / `reset hardware failed`, especially after long uptime or a Zigbee rejoin | Duplicate `SCD30_Task` spawned by a re-fired `ESP_ZB_BDB_SIGNAL_STEERING` (happens on any rejoin, not just first boot), causing two tasks to fight over the same I2C bus | Already guarded with a `static bool scd30_task_started` flag in `esp_zb_app_signal_handler` - don't remove |
+| `clear bus failed` / `reset hardware failed`, especially after long uptime or a Zigbee rejoin | (C++ era) a second I2C owner: a re-fired steering signal spawned a duplicate sensor task | The Rust sensor thread is the only I2C owner, started once in `main`; never start threads from `esp_zb_app_signal_handler` |
 | CO2 stuck near 0-1 ppm, temperature/humidity fine, no response to breath | Confirmed hardware defect in this SCD30 unit's calibration storage ([evidence](docs/scd30-defect-evidence.md)) | Self-heal + FRC workaround (Step 4); detector itself works fine once calibrated |
 | FRC succeeds (`OK` logged) but reverts after a real power cycle | Same defect as above - contradicts Sensirion's own documented persistence behavior | Self-heal mechanism re-asserts FRC automatically every boot from ESP32 NVS |
-| A single `1` ppm reading right after any FRC (boot self-heal or Zigbee switch), then normal | Transient from the sensor on the first measurement after FRC - seen on every FRC | Harmless; next reading (15 s later) is correct |
+| `Discarding Post-FRC Transient` in the log after every FRC | The sensor's first reading after FRC is ~1 ppm garbage | Expected; it is not reported |
 | Z2M shows "Unsupported" / "Automatically generated definition" despite installing the converter | Wrong folder (needs `external_converters/` subfolder, not the data dir root) | See Step 5 |
 | `EACCES ... symlink 'node_modules'` in Z2M log | The `external_converters/` directory itself is root-owned | `chown -R` the *directory*, not just the `.js` file, to the `zigbee2mqtt` service user |
 | Converter loads, device shows correct model, but still says "Unsupported" / fields stuck at placeholder values right after installing the converter | `configure()` hasn't run for this already-paired device yet | Click **Reconfigure** on the device page in Z2M once |
-| Temperature specifically stuck at `null` forever after boot, while CO2/humidity update fine | **Fixed** - was a signed 16-bit overflow in the reporting engine's delta check, triggered by the old `-32768` placeholder. See Step 6 | Temperature's placeholder changed to `0` in `main.cpp` - don't revert to `0x8000` |
+| Temperature specifically stuck at `null` forever after boot, while CO2/humidity update fine | **Fixed** - was a signed 16-bit overflow in the reporting engine's delta check, triggered by the old `-32768` placeholder. See Step 6 | Placeholder is `0` (`logic::zcl::TEMP_PLACEHOLDER`, unit-tested) - don't revert to `0x8000` |
 | Any single field occasionally stuck after a specific reboot (rare now that the Step 6 bug is fixed) | A one-shot ZDO Bind Request can occasionally fail on ordinary radio packet loss (confirmed once via `AREQ - ZDO - bindRsp after 10000ms`) | Click Reconfigure once; consider re-adding the `onEvent` polling pattern from Step 6 if this becomes frequent |
 | Breath test shows only a small CO2 rise (e.g. 400 -> 560 ppm) | Expected - exhaled breath (~40,000+ ppm) is heavily diluted by room air before reaching the sensor, and the sensor has a ~20s response time | Not a sign of inaccuracy; use FRC against a genuine known reference to judge real accuracy, not a breath test |
+| **Rust:** `Failed to read SCD30 measurement: I2C(... ESP_ERR_TIMEOUT ...)` | SCD30 clock stretching exceeds the default I2C bus timeout | `sensor_hw.rs` sets `.timeout(100 ms)` (C6 max ~105 ms) - keep it |
+| **Rust:** build fails, `partitions.csv` not found under `target/.../out` | esp-idf-sys resolves the partition-table path from its generated project | `CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="../../../../../../partitions.csv"` in `sdkconfig.defaults` |
+| **Rust:** link error `undefined reference to esp_zb_app_signal_handler` | ZBOSS calls an app-defined handler | Defined `#[no_mangle]` in `firmware/src/zb.rs` |
+| **Rust:** constant `..._CORE_SET_ATTR_VALUE_CB_ID` not found | bindgen names it after the C struct tag | Use `esp_zb_core_action_callback_id_s_ESP_ZB_CORE_SET_ATTR_VALUE_CB_ID` |
+| **Rust:** Z2M still shows old clusters/strings after a firmware change | Interview data is cached | `scripts/z2m-contract.sh --reinterview`, diff against `docs/z2m-baseline.json` (`power_source` shows `null` for both firmwares today) |
+| **Rust:** CO2 values are whole ppm, up to 1 ppm low | `libscd` truncates CO2 (`as u16`) | Accepted (Q33); the converter rounds to ppm anyway |
 
 ---
 
-## Key firmware constants (`main.cpp`)
+## Key constants (`logic/src/calib.rs`, `logic/src/zcl.rs`)
 
 | Constant | Purpose |
 |---|---|
-| `SCD30_MEASUREMENT_INTERVAL_SECONDS` (15) | SCD30 internal measurement interval + firmware read/report interval; also used for the boot self-heal FRC |
-| `SCD30_FRC_INTERVAL_SECONDS` (2) | Interval used for the 2 minutes before a manual reference FRC (then back to 15 s) |
-| `SCD30_TEMPERATURE_OFFSET_CENTI_C` (320) | Sensor-side self-heating correction (ensured at boot); refine against a reference thermometer: `(SCD30 - reference) * 100 + current` after ~10 min |
-| `SCD30_PERFORM_FRC` | Set `true` once, outdoors, to (re)seed calibration; `false` for normal operation |
-| `SCD30_FRC_REFERENCE_PPM` (425) | Assumed outdoor CO2 ppm for manual FRC - check/update periodically |
-| `SCD30_FRC_MIN_PPM` / `MAX_PPM` (400-2000) | FRC command's own documented valid input range |
-| `SCD30_PLAUSIBLE_MIN_PPM` / `MAX_PPM` (300-10000) | Sanity bounds for self-heal save/reassert, matching the sensor's accuracy-guaranteed range |
-| `SCD30_SAVE_INTERVAL_READINGS` (20, ~5 min) | How often a trusted live reading updates the self-heal reference in NVS |
-| Temperature placeholder (`0` in `temp_cfg`) | Fixed from `0x8000` - see Step 6 for why; don't revert |
+| `MEASUREMENT_INTERVAL_S` (15) | SCD30 Measurement Interval and the firmware's Report Period; also used by Self-Heal |
+| `FRC_INTERVAL_S` (2) | Measurement Interval for the 2 minutes before a Reference Recalibration |
+| `TEMPERATURE_OFFSET_CENTI_C` (320) | Sensor-side self-heating correction (ensured at boot); refine against a reference thermometer: `(SCD30 - reference) * 100 + current` after ~10 min |
+| `FRC_REFERENCE_PPM` (425) | Assumed outdoor CO2 for a Reference Recalibration - check periodically |
+| `SELF_HEAL_WAIT_MS` (120 000) | Measurements before any FRC (Sensirion: >= 2 min) |
+| `SAVE_EVERY_READINGS` (20, ~5 min) | How often a Trusted Session updates the Stored Reference |
+| `clamp_frc_reference` (400-2000) / `is_plausible` (300-10000) | FRC command range / sanity bounds for saving and re-applying |
+| `TEMP_PLACEHOLDER` (`0`) | Temperature value before the first reading - see Step 6; never `0x8000` |
+| Cargo feature `self-heal` (default on) | Disable with `--no-default-features` for a sensor that keeps its FRC |
