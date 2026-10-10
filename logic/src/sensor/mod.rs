@@ -166,6 +166,80 @@ impl<S: Scd30, St: StoredReference, R: Reporter, C: Clock> SensorService<S, St, 
             }
         }
     }
+
+    /// One loop iteration (every 15 s): due self-heal FRC, then read/report/save.
+    pub fn tick(&mut self) {
+        if let SelfHeal::Pending { due_ms, reference_ppm } = self.self_heal {
+            // Like the C++ firmware: no readings or reports until the self-heal FRC ran -
+            // the uncalibrated sensor reports ~1 ppm.
+            if self.clock.now_ms() < due_ms {
+                return;
+            }
+            self.self_heal = SelfHeal::Inactive;
+            let result = self.sensor.force_recalibration(reference_ppm);
+            self.discard_next_reading = true; // Post-FRC Transient
+            match result {
+                Ok(()) => {
+                    log::info!("Self-heal recalibration to {reference_ppm} ppm: OK");
+                    self.trusted_session = true;
+                }
+                Err(e) => log::warn!("Self-heal recalibration FAILED ({e:?})"),
+            }
+        }
+        self.read_and_report();
+    }
+
+    fn read_and_report(&mut self) {
+        match self.sensor.data_ready() {
+            Ok(true) => match self.sensor.read_measurement() {
+                Ok(reading) => {
+                    self.consecutive_failures = 0;
+                    if self.discard_next_reading {
+                        // The sensor's first reading after any FRC is ~1 ppm garbage.
+                        self.discard_next_reading = false;
+                        log::info!("Discarding Post-FRC Transient ({:.1} ppm)", reading.co2_ppm);
+                        return;
+                    }
+                    self.reporter.report(&Report::from_reading(&reading));
+                    log::info!(
+                        "CO2: {:.1} ppm, Temp: {:.2} C, Humidity: {:.2} %",
+                        reading.co2_ppm, reading.temperature_c, reading.humidity_pct
+                    );
+                    self.maybe_save_reference(reading.co2_ppm);
+                }
+                Err(_) => self.note_failure("Failed to read SCD30 measurement"),
+            },
+            Ok(false) => {}
+            Err(_) => self.note_failure("Failed to query SCD30 data-ready status"),
+        }
+    }
+
+    /// Only a Trusted Session may update the Stored Reference - otherwise the ~1 ppm
+    /// uncalibrated value would overwrite it.
+    fn maybe_save_reference(&mut self, co2_ppm: f32) {
+        if !self.trusted_session || !is_plausible(co2_ppm) {
+            return;
+        }
+        self.trusted_readings += 1;
+        if self.trusted_readings % SAVE_EVERY_READINGS != 0 {
+            return;
+        }
+        let rounded = co2_ppm.round() as i32;
+        if self.store.save(rounded) {
+            log::info!("Self-heal reference updated to {rounded} ppm");
+        } else {
+            log::warn!("Failed to update self-heal reference in NVS");
+        }
+    }
+
+    fn note_failure(&mut self, what: &str) {
+        self.consecutive_failures += 1;
+        log::warn!("{what} ({} consecutive)", self.consecutive_failures);
+        if self.consecutive_failures >= BUS_RECOVERY_AFTER_FAILURES {
+            self.sensor.recover_bus();
+            self.consecutive_failures = 0;
+        }
+    }
 }
 
 #[cfg(test)]
