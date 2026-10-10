@@ -94,7 +94,10 @@ idf.py -p /dev/ttyACM0 flash
 
 **This SCD30 unit has a confirmed hardware defect**: its Forced Recalibration
 (FRC) value does not survive a real power cycle, even though Sensirion's own
-datasheet says it should. The firmware works around this with a *self-heal*
+datasheet says it should. Re-verified with controlled power-cut tests on
+2026-10-10 (ASC off, Sensirion's 2 s FRC procedure, every other NVM setting
+persisting) - see [`docs/scd30-defect-evidence.md`](docs/scd30-defect-evidence.md).
+The firmware works around this with a *self-heal*
 mechanism (stores the last trusted CO2 reading in the ESP32's own NVS flash,
 which - unlike the SCD30's NVM - reliably survives power loss, and reasserts
 it via FRC on every boot). But NVS starts empty, so it needs seeding once:
@@ -112,9 +115,11 @@ it via FRC on every boot). But NVS starts empty, so it needs seeding once:
 baseline - this drifts a few ppm per year (was ~420 a couple years ago); worth
 a quick check if redoing this far in the future.
 
-`SCD30_ENABLE_ASC` automatically follows `SCD30_PERFORM_FRC` (off during a
-manual FRC run to avoid the two conflicting, on otherwise as a background
-safety net) - nothing to configure separately.
+ASC (automatic self-calibration) is kept **permanently off**: the boot-time FRC
+always overrides it on this unit, so running both only lets them fight. The
+firmware reads the ASC state at boot and writes it off only if found on. Every
+FRC (seeding, self-heal, Zigbee switch) follows Sensirion's procedure: 2 s
+measurement interval for 2 minutes, FRC, then back to 15 s.
 
 You can also trigger a fresh FRC any time from Home Assistant/Zigbee2MQTT
 (see below) instead of editing/reflashing - flip the exposed **Trigger
@@ -253,8 +258,9 @@ the (nice-to-have) lower-latency push behavior.
 | `phy_init: NVS has not been initialized` warning | Missing `nvs_flash_init()` | Already called in `app_main()` - don't remove |
 | Steering keeps failing (`status: -1` repeatedly) | Channel mask too narrow, or permit join not enabled on the coordinator | Use `ESP_ZB_TRANSCEIVER_ALL_CHANNELS_MASK`; enable permit join in Z2M |
 | `clear bus failed` / `reset hardware failed`, especially after long uptime or a Zigbee rejoin | Duplicate `SCD30_Task` spawned by a re-fired `ESP_ZB_BDB_SIGNAL_STEERING` (happens on any rejoin, not just first boot), causing two tasks to fight over the same I2C bus | Already guarded with a `static bool scd30_task_started` flag in `esp_zb_app_signal_handler` - don't remove |
-| CO2 stuck near 0-1 ppm, temperature/humidity fine, no response to breath | Confirmed hardware defect in this SCD30 unit's calibration storage (see dispute report if filed) | Self-heal + FRC workaround (Step 4); detector itself works fine once calibrated |
+| CO2 stuck near 0-1 ppm, temperature/humidity fine, no response to breath | Confirmed hardware defect in this SCD30 unit's calibration storage ([evidence](docs/scd30-defect-evidence.md)) | Self-heal + FRC workaround (Step 4); detector itself works fine once calibrated |
 | FRC succeeds (`OK` logged) but reverts after a real power cycle | Same defect as above - contradicts Sensirion's own documented persistence behavior | Self-heal mechanism re-asserts FRC automatically every boot from ESP32 NVS |
+| A single `1` ppm reading right after any FRC (boot self-heal or Zigbee switch), then normal | Transient from the sensor on the first measurement after FRC - seen on every FRC | Harmless; next reading (15 s later) is correct |
 | Z2M shows "Unsupported" / "Automatically generated definition" despite installing the converter | Wrong folder (needs `external_converters/` subfolder, not the data dir root) | See Step 5 |
 | `EACCES ... symlink 'node_modules'` in Z2M log | The `external_converters/` directory itself is root-owned | `chown -R` the *directory*, not just the `.js` file, to the `zigbee2mqtt` service user |
 | Converter loads, device shows correct model, but still says "Unsupported" / fields stuck at placeholder values right after installing the converter | `configure()` hasn't run for this already-paired device yet | Click **Reconfigure** on the device page in Z2M once |
@@ -271,7 +277,7 @@ the (nice-to-have) lower-latency push behavior.
 | `SCD30_MEASUREMENT_INTERVAL_SECONDS` (15) | SCD30 internal measurement + reporting poll interval |
 | `SCD30_PERFORM_FRC` | Set `true` once, outdoors, to (re)seed calibration; `false` for normal operation |
 | `SCD30_FRC_REFERENCE_PPM` (425) | Assumed outdoor CO2 ppm for manual FRC - check/update periodically |
-| `SCD30_ENABLE_ASC` | Auto-derived as `!SCD30_PERFORM_FRC` - don't set directly |
+| `SCD30_FRC_INTERVAL_SECONDS` (2) | Measurement interval used for the 2 minutes before every FRC (Sensirion procedure) |
 | `SCD30_FRC_MIN_PPM` / `MAX_PPM` (400-2000) | FRC command's own documented valid input range |
 | `SCD30_PLAUSIBLE_MIN_PPM` / `MAX_PPM` (300-10000) | Sanity bounds for self-heal save/reassert, matching the sensor's accuracy-guaranteed range |
 | `SCD30_SAVE_INTERVAL_READINGS` (20, ~5 min) | How often a trusted live reading updates the self-heal reference in NVS |
