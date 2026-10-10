@@ -182,3 +182,79 @@ fn five_consecutive_failures_trigger_one_bus_recovery() {
     // failures: e, e, read-crc (3), e (4), e (5) -> recovery; 6th tick: read-crc (1)
     assert_eq!(s.parts().0.count(Call::RecoverBus), 1);
 }
+#[test]
+fn reference_recalibration_runs_sensirion_procedure_and_restores_normal_interval() {
+    let mut s = booted(None);
+    assert!(s.request_reference_recalibration());
+    assert_eq!(s.parts().0.writes(), vec![(Setting::MeasurementInterval, 2)]);
+
+    advance(&mut s, 60_000);
+    s.tick(); // still settling: keeps reporting, no FRC yet
+    assert!(s.parts().0.frcs().is_empty());
+    assert_eq!(s.parts().2.reports.len(), 1);
+
+    advance(&mut s, 60_000);
+    s.tick();
+    let (sensor, store, reporter, _) = s.parts();
+    assert_eq!(sensor.frcs(), vec![425]);
+    assert_eq!(sensor.writes(), vec![(Setting::MeasurementInterval, 2), (Setting::MeasurementInterval, 15)]);
+    assert_eq!(store.saves, vec![425]);
+    assert_eq!(reporter.switch_resets, 1);
+    assert_eq!(reporter.reports.len(), 2);
+
+    s.tick(); // first reading after the FRC: Post-FRC Transient, discarded
+    assert_eq!(s.parts().2.reports.len(), 2);
+}
+
+#[test]
+fn successful_reference_recalibration_starts_trusted_session() {
+    // Q4: a fresh board (no Stored Reference) must start saving after a Reference Recalibration.
+    let mut s = booted(None);
+    s.request_reference_recalibration();
+    advance(&mut s, SELF_HEAL_WAIT_MS);
+    s.tick(); // finishes the recalibration, saves 425
+    for _ in 0..21 {
+        s.tick(); // 1 discarded transient + 20 counted readings
+    }
+    assert_eq!(s.parts().1.saves, vec![425, 500]);
+}
+
+#[test]
+fn second_request_while_settling_is_ignored() {
+    let mut s = booted(None);
+    assert!(s.request_reference_recalibration());
+    assert!(!s.request_reference_recalibration());
+    assert_eq!(s.parts().0.writes().len(), 1);
+}
+
+#[test]
+fn reference_recalibration_supersedes_pending_self_heal() {
+    let mut s = booted(Some(436));
+    advance(&mut s, 30_000);
+    assert!(s.request_reference_recalibration());
+    advance(&mut s, SELF_HEAL_WAIT_MS);
+    s.tick();
+    assert_eq!(s.parts().0.frcs(), vec![425]); // never 436
+    assert!(!s.self_heal_pending());
+}
+
+#[test]
+fn failed_reference_recalibration_still_restores_interval_and_resets_switch_without_saving() {
+    let mut s = booted(None);
+    s.parts_mut().0.frc_error = Some("nack");
+    s.request_reference_recalibration();
+    advance(&mut s, SELF_HEAL_WAIT_MS);
+    s.tick();
+    let (sensor, store, reporter, _) = s.parts();
+    assert_eq!(sensor.writes().last(), Some(&(Setting::MeasurementInterval, 15)));
+    assert!(store.saves.is_empty());
+    assert_eq!(reporter.switch_resets, 1);
+}
+
+#[test]
+fn interval_switch_failures_are_retried() {
+    let mut s = booted(None);
+    s.parts_mut().0.fail_writes = 2;
+    s.request_reference_recalibration();
+    assert_eq!(s.parts().0.writes(), vec![(Setting::MeasurementInterval, 2); 3]);
+}
