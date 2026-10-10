@@ -1,13 +1,18 @@
 # SCD30 defect evidence — FRC calibration lost on every power cycle
 
-Collected 2026-10-10 on the device in this repo. Intended as the basis for a
-warranty / replacement claim to Sensirion or the seller.
+Collected 2026-10-10 on the device in this repo.
+
+**Source of the unit: AliExpress (marketplace).** It may be a clone or a reject rather than a
+genuine Sensirion part; over I2C it is indistinguishable (it speaks the full SCD30 protocol and
+reports firmware 3.66). Decision (2026-10-10): **no warranty claim**. This document stays as the
+record of why the firmware's Self-Heal exists. A replacement sensor from an authorized
+distributor (Mouser, Digi-Key, Farnell) is the real fix.
 
 ## Unit and setup
 
 | Item | Value |
 |---|---|
-| Sensor | Sensirion SCD30, I2C address `0x61`, firmware **3.66** (read via `0xD100`) |
+| Sensor | SCD30 sold as Sensirion (AliExpress, authenticity unverified), I2C address `0x61`, firmware **3.66** (read via `0xD100`) |
 | Host | ESP32-C6 (QFN40, rev v0.2), ESP-IDF 5.5.2, `i2c_master` driver |
 | Wiring | SDA `GPIO21`, SCL `GPIO7`, ESP internal pull-ups; 100 kHz in production, **50 kHz** in all tests below |
 | Supply | from the ESP32-C6 devkit (USB powered) |
