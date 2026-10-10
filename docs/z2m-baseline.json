@@ -1,0 +1,78 @@
+{
+  "captured_at": "2026-10-10",
+  "source": "zigbee2mqtt/bridge/devices (Z2M 2.7.0), C++ firmware 8e29f0f",
+  "friendly_name": "CO2 sensor",
+  "ieee_address": "0xa0f262fffe45ce34",
+  "type": "EndDevice",
+  "manufacturer": "Nolik",
+  "model_id": "ESP32C6-SCD30-Zigbee",
+  "power_source": "Mains (single phase)",
+  "software_build_id": null,
+  "date_code": null,
+  "interview_completed": true,
+  "interview_state": "SUCCESSFUL",
+  "supported": true,
+  "endpoints": {
+    "1": {
+      "bindings": [
+        {
+          "cluster": "msCO2",
+          "target": "endpoint"
+        },
+        {
+          "cluster": "msTemperatureMeasurement",
+          "target": "endpoint"
+        },
+        {
+          "cluster": "msRelativeHumidity",
+          "target": "endpoint"
+        },
+        {
+          "cluster": "genOnOff",
+          "target": "endpoint"
+        }
+      ],
+      "clusters": {
+        "input": [
+          "genBasic",
+          "genIdentify",
+          "msCO2",
+          "msTemperatureMeasurement",
+          "msRelativeHumidity",
+          "genOnOff"
+        ],
+        "output": []
+      },
+      "configured_reportings": [
+        {
+          "cluster": "msTemperatureMeasurement",
+          "attribute": "measuredValue",
+          "minimum_report_interval": 10,
+          "maximum_report_interval": 3600,
+          "reportable_change": 100
+        },
+        {
+          "cluster": "msRelativeHumidity",
+          "attribute": "measuredValue",
+          "minimum_report_interval": 10,
+          "maximum_report_interval": 3600,
+          "reportable_change": 100
+        },
+        {
+          "cluster": "genOnOff",
+          "attribute": "onOff",
+          "minimum_report_interval": 0,
+          "maximum_report_interval": 3600,
+          "reportable_change": 0
+        },
+        {
+          "cluster": "msCO2",
+          "attribute": "measuredValue",
+          "minimum_report_interval": 0,
+          "maximum_report_interval": 3600,
+          "reportable_change": 0.00001
+        }
+      ]
+    }
+  }
+}
