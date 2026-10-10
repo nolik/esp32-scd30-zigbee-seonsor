@@ -9,17 +9,6 @@ use std::time::Duration;
 use esp_idf_svc::nvs::EspDefaultNvsPartition;
 use logic::calib::MEASUREMENT_INTERVAL_S;
 use logic::sensor::{Config, Reporter, SensorService};
-use logic::zcl::Report;
-
-/// M1 stand-in until Zigbee reporting exists (Task 10).
-struct LogReporter;
-
-impl Reporter for LogReporter {
-    fn report(&mut self, _report: &Report) {}
-    fn reset_recalibration_switch(&mut self) {
-        log::info!("(no Zigbee yet) FRC switch reset");
-    }
-}
 
 fn main() -> anyhow::Result<()> {
     esp_idf_svc::sys::link_patches();
@@ -29,7 +18,7 @@ fn main() -> anyhow::Result<()> {
     let nvs = EspDefaultNvsPartition::take()?;
     let (recal_tx, recal_rx) = mpsc::channel::<()>();
     zb::start(recal_tx)?;
-    let sensor_thread = run_sensor(nvs, LogReporter, recal_rx)?; // Task 10 swaps in ZigbeeReporter
+    let sensor_thread = run_sensor(nvs, zb::ZigbeeReporter, recal_rx)?;
     sensor_thread.join().map_err(|_| anyhow::anyhow!("sensor thread panicked"))?;
     Ok(())
 }
