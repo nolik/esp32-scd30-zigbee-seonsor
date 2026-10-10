@@ -22,3 +22,9 @@ result-*
  
 # OS noise
 .DS_Store
+
+# Rust
+/target/
+/logic/target/
+/firmware/target/
+/firmware/.embuild/
