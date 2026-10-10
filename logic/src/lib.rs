@@ -3,3 +3,4 @@
 //! supplies trait implementations.
 pub mod calib;
 pub mod zcl;
+pub mod sensor;
