@@ -9,7 +9,10 @@ use std::sync::OnceLock;
 
 use esp_idf_svc::sys::{esp, zb as ffi};
 use logic::sensor::Reporter;
-use logic::zcl::{Report, CO2_PLACEHOLDER, HUMIDITY_PLACEHOLDER, TEMP_PLACEHOLDER};
+use logic::zcl::{
+    Report, CO2_MAX_FRACTION, CO2_PLACEHOLDER, HUMIDITY_MAX_CENTI, HUMIDITY_PLACEHOLDER, TEMP_MAX_CENTI,
+    TEMP_MIN_CENTI, TEMP_PLACEHOLDER,
+};
 
 // Numeric values from the ZCL / HA specs (stable across SDK versions).
 const ENDPOINT: u8 = 1;
@@ -87,17 +90,17 @@ unsafe fn build_endpoint() -> *mut ffi::esp_zb_ep_list_t {
     let mut co2_cfg: ffi::esp_zb_carbon_dioxide_measurement_cluster_cfg_t = core::mem::zeroed();
     co2_cfg.measured_value = CO2_PLACEHOLDER.0;
     co2_cfg.min_measured_value = 0.0;
-    co2_cfg.max_measured_value = 0.01; // 10000 ppm
+    co2_cfg.max_measured_value = CO2_MAX_FRACTION;
 
     let mut temp_cfg: ffi::esp_zb_temperature_meas_cluster_cfg_t = core::mem::zeroed();
     temp_cfg.measured_value = TEMP_PLACEHOLDER.0; // 0, never 0x8000 (README Step 6)
-    temp_cfg.min_value = -4000;
-    temp_cfg.max_value = 8500;
+    temp_cfg.min_value = TEMP_MIN_CENTI;
+    temp_cfg.max_value = TEMP_MAX_CENTI;
 
     let mut humidity_cfg: ffi::esp_zb_humidity_meas_cluster_cfg_t = core::mem::zeroed();
     humidity_cfg.measured_value = HUMIDITY_PLACEHOLDER.0;
     humidity_cfg.min_value = 0;
-    humidity_cfg.max_value = 10_000;
+    humidity_cfg.max_value = HUMIDITY_MAX_CENTI;
 
     let mut on_off_cfg: ffi::esp_zb_on_off_cluster_cfg_t = core::mem::zeroed(); // off
 
