@@ -75,8 +75,3 @@ ssh use a small pyserial reader in `nix shell` (opening the port can reset the E
   both the Rust and the old C++ firmware.
 - The previous C++ firmware is tag `cpp-final`; README "Rollback to the C++ firmware" has the steps
   (never `idf.py set-target` there — it drops the custom partition table).
-
-## Commits
-
-Author `nolik <nolik03@gmail.com>` (repo-local git config), no `Co-Authored-By` trailer, and
-`commit.gpgsign false` locally (the global key is a work identity). Changes go through PRs to `main`.
