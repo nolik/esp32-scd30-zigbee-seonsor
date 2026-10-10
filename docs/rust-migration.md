@@ -47,7 +47,14 @@ and do not carry over.
 | Q28 | Production restored; diagnostic firmware kept on local branch `diag/scd30-persistence` (build machine only) | |
 | Q29 | ASC **permanently off** (read at boot, written only if on); every FRC uses Sensirion's procedure (2 s interval for 2 min, FRC, back to 15 s). Applied to C++ now and to the Rust parity spec | Boot FRC always overrides ASC; FRC accuracy per datasheet |
 | Q31/Q32 | Sensor interval **15 s** normally (ensure-at-boot). **Manual reference FRC** (Zigbee switch) at 2 s: switch, wait 2 min, FRC, back to 15 s. **Boot self-heal FRC at 15 s** (wait 2 min, FRC). Temperature offset 320 (ensure-at-boot) | User preference for 15 s operation. Interval change shifts CO2 ~7 ppm (measured 2↔15 s, 2↔5 s), so a self-heal at 2 s would drift readings ~7 ppm lower per reboot. Accepted: after a manual 2 s FRC the 15 s readings sit ~7 ppm below the reference (constant) |
-| Q30 | Defect evidence written up for a warranty claim (`docs/scd30-defect-evidence.md`); in Rust the self-heal sits behind a config flag (default on) | A replacement unit makes self-heal optional |
+| G1–G3 | Ubiquitous language in `CONTEXT.md`: Reference Recalibration, Self-Heal, FRC (command only), Stored Reference, Trusted Session, Post-FRC Transient, Measurement Interval, Report Period; code names follow it | "FRC"/"interval" meant different things in code, docs and conversation |
+| G4 | A successful Reference Recalibration starts a Trusted Session (deliberate change from C++, where it saved 425 but never updated the Stored Reference again until reboot) | Makes the Trusted Session rule consistent; fresh boards start saving immediately |
+| G5 | The Post-FRC Transient (one ~1 ppm reading after every FRC) is discarded: not reported, counted or saved (deliberate change from C++) | Keeps garbage out of HA history and automations |
+| G6 | No seeding mode: a Reference Recalibration needs Zigbee, so do it at an open window within range | Rare event; a boot-button trigger is possible later but out of migration scope |
+| Q33 | Accept `libscd` truncating CO2 to whole ppm (≤ 1 ppm low) | Well under ±30 ppm spec; converter rounds to ppm anyway |
+| Q34 | ADRs for the three surprising, hard-to-reverse trade-offs: `docs/adr/0001` ZBOSS v1 via FFI, `0002` partition gap, `0003` Self-Heal 15 s vs Reference Recalibration 2 s | Stop future "fixes" that break pairing or reintroduce drift |
+| Q35 | Implementation on branch `rust-migration` from `main` after PR #1; native execution in one session; standing permission to flash firmware during execution (never erase, never `/dev/ttyUSB0`, ask before recalibrating or physical steps) | Hardware steps need the user in the loop |
+| Q30 | Defect evidence written up (`docs/scd30-defect-evidence.md`); in Rust the self-heal sits behind a config flag (default on). Unit bought on AliExpress (possibly a clone): **no warranty claim** | A replacement unit from an authorized distributor makes self-heal optional |
 
 ## Facts established
 
