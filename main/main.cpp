@@ -46,9 +46,19 @@
 #define SCD30_CMD_AUTOMATIC_SELF_CALIBRATION      0x5306
 #define SCD30_CMD_FORCED_RECALIBRATION            0x5204
 #define SCD30_CMD_GET_FIRMWARE_VERSION            0xD100
+#define SCD30_CMD_TEMPERATURE_OFFSET              0x5403
 
+// Normal operation: the sensor measures (and we read/report) every 15 s. A manual FRC against
+// a real reference runs at Sensirion's 2 s interval and then switches back. On this unit any
+// interval change shifts CO2 by ~7 ppm, so the boot self-heal - which replays a value measured
+// at 15 s - must stay at 15 s, or every reboot would shift readings another ~7 ppm.
 #define SCD30_MEASUREMENT_INTERVAL_SECONDS       15
-#define SCD30_FRC_INTERVAL_SECONDS               2  // Sensirion FRC procedure: 2 s interval for >= 2 min
+#define SCD30_FRC_INTERVAL_SECONDS               2
+
+// Sensor-side self-heating correction (also compensates humidity) for 15 s operation.
+// Refine against a reference thermometer: new = (SCD30 - reference) * 100 + current,
+// after ~10 min in place.
+#define SCD30_TEMPERATURE_OFFSET_CENTI_C         320
 
 // Self-heal: the SCD30's own calibration doesn't survive power cycles on this unit,
 // so we keep our own "last known good CO2" on the ESP32's flash (NVS) and re-assert
@@ -59,7 +69,7 @@
 #define SCD30_CAL_NVS_NAMESPACE "scd30_cal"
 #define SCD30_CAL_NVS_KEY "last_co2"
 #define SCD30_SELF_HEAL_WAIT_MS (120 * 1000) // Sensirion requires >=2 min stable readings before FRC
-#define SCD30_SAVE_INTERVAL_READINGS 20      // ~5 min at the 15s interval above
+#define SCD30_SAVE_INTERVAL_READINGS 20      // ~5 min at the 15 s interval above
 
 // FRC command's documented valid range - clamp any reference (manual or self-healed)
 // to this before sending, since indoor CO2 can exceed it in poorly-ventilated rooms.
@@ -164,15 +174,6 @@ static esp_err_t scd30_write_command_arg(uint16_t cmd, uint16_t arg) {
 static esp_err_t scd30_trigger_continuous_measurement() {
     // Argument 0x0000 = use default ambient pressure compensation (1013.25 mBar)
     return scd30_write_command_arg(SCD30_CMD_TRIGGER_CONTINUOUS_MEASUREMENT, 0x0000);
-}
-
-static esp_err_t scd30_set_measurement_interval(uint16_t seconds) {
-    // Stored in the SCD30's non-volatile memory; persists across power cycles.
-    return scd30_write_command_arg(SCD30_CMD_SET_MEASUREMENT_INTERVAL, seconds);
-}
-
-static esp_err_t scd30_set_auto_self_calibration(bool enable) {
-    return scd30_write_command_arg(SCD30_CMD_AUTOMATIC_SELF_CALIBRATION, enable ? 1 : 0);
 }
 
 // Forces the sensor to treat its CURRENT reading as `reference_ppm`. Only call this after
@@ -333,19 +334,37 @@ static void report_sensor_values(float co2_ppm, float temperature_c, float humid
 #define SCD30_PERFORM_FRC false
 #define SCD30_FRC_REFERENCE_PPM 425
 
-// Sensirion's FRC procedure: run at a 2 s interval for >= 2 minutes, then FRC, then
-// restore the normal interval. The 2026-10-10 diagnostics showed this unit loses its
-// FRC on power loss regardless (docs/scd30-defect-evidence.md) - this only keeps each
-// FRC as accurate as the datasheet allows.
-static esp_err_t scd30_frc_with_sensirion_procedure(uint16_t reference_ppm) {
-    scd30_retry_until_ok([]() { return scd30_set_measurement_interval(SCD30_FRC_INTERVAL_SECONDS); },
+// Self-heal FRC: re-asserts a value that was measured at the normal 15 s interval, so it
+// runs at that same interval after >= 2 minutes of measurements.
+static esp_err_t scd30_frc_at_normal_interval(uint16_t reference_ppm) {
+    vTaskDelay(pdMS_TO_TICKS(SCD30_SELF_HEAL_WAIT_MS));
+    return scd30_force_recalibration(reference_ppm);
+}
+
+// Reference FRC (outdoor air, manual): Sensirion's procedure of >= 2 minutes at a 2 s interval,
+// then FRC, then back to the normal interval. The 2026-10-10 diagnostics showed this unit loses
+// its FRC on power loss regardless (docs/scd30-defect-evidence.md).
+static esp_err_t scd30_frc_at_reference_interval(uint16_t reference_ppm) {
+    scd30_retry_until_ok([]() { return scd30_write_command_arg(SCD30_CMD_SET_MEASUREMENT_INTERVAL,
+                                                               SCD30_FRC_INTERVAL_SECONDS); },
                          "SCD30 set_measurement_interval (FRC)");
     vTaskDelay(pdMS_TO_TICKS(SCD30_SELF_HEAL_WAIT_MS));
     esp_err_t frc_err = scd30_force_recalibration(reference_ppm);
-    vTaskDelay(pdMS_TO_TICKS(10));
-    scd30_retry_until_ok([]() { return scd30_set_measurement_interval(SCD30_MEASUREMENT_INTERVAL_SECONDS); },
+    vTaskDelay(pdMS_TO_TICKS(10)); // back-to-back commands get NACKed
+    scd30_retry_until_ok([]() { return scd30_write_command_arg(SCD30_CMD_SET_MEASUREMENT_INTERVAL,
+                                                               SCD30_MEASUREMENT_INTERVAL_SECONDS); },
                          "SCD30 set_measurement_interval (normal)");
     return frc_err;
+}
+
+// Writes a persisted SCD30 setting only when it differs from what the sensor already
+// stores - every write lands in the sensor's NVM, so don't rewrite it on every boot.
+static void scd30_ensure_setting(uint16_t cmd, uint16_t target, const char *name) {
+    uint16_t current = 0;
+    if (scd30_read_word(cmd, &current) == ESP_OK && current == target) return;
+    vTaskDelay(pdMS_TO_TICKS(10));
+    scd30_retry_until_ok([cmd, target]() { return scd30_write_command_arg(cmd, target); }, name);
+    ESP_LOGI(TAG, "%s set to %u (was %u)", name, target, current);
 }
 
 static void scd30_task(void *pvParameters) {
@@ -358,20 +377,18 @@ static void scd30_task(void *pvParameters) {
 
     // Retry setup commands with backoff and bus recovery instead of aborting the
     // whole device or spinning tight against a potentially stuck bus.
-    scd30_retry_until_ok([]() { return scd30_set_measurement_interval(SCD30_MEASUREMENT_INTERVAL_SECONDS); },
-                         "SCD30 set_measurement_interval");
+    scd30_ensure_setting(SCD30_CMD_SET_MEASUREMENT_INTERVAL, SCD30_MEASUREMENT_INTERVAL_SECONDS,
+                         "SCD30 measurement interval");
     vTaskDelay(pdMS_TO_TICKS(10));
 
     // ASC stays permanently off: this unit forgets its FRC on every power cycle, so the
     // boot-time FRC below always overrides whatever ASC learned (Sensirion: each one
-    // supersedes the other). Only written when found on, to spare the sensor's NVM.
-    uint16_t asc_state = 1;
-    if (scd30_read_word(SCD30_CMD_AUTOMATIC_SELF_CALIBRATION, &asc_state) != ESP_OK || asc_state != 0) {
-        vTaskDelay(pdMS_TO_TICKS(10));
-        scd30_retry_until_ok([]() { return scd30_set_auto_self_calibration(false); },
-                             "SCD30 disable ASC");
-        ESP_LOGI(TAG, "ASC disabled");
-    }
+    // supersedes the other).
+    scd30_ensure_setting(SCD30_CMD_AUTOMATIC_SELF_CALIBRATION, 0, "SCD30 ASC");
+    vTaskDelay(pdMS_TO_TICKS(10));
+
+    scd30_ensure_setting(SCD30_CMD_TEMPERATURE_OFFSET, SCD30_TEMPERATURE_OFFSET_CENTI_C,
+                         "SCD30 temperature offset");
     vTaskDelay(pdMS_TO_TICKS(10));
 
     scd30_retry_until_ok([]() { return scd30_trigger_continuous_measurement(); },
@@ -385,7 +402,7 @@ static void scd30_task(void *pvParameters) {
         // self-heal below can only ever re-assert what we already trusted.
         ESP_LOGW(TAG, "Waiting 2 minutes for stable readings before forced recalibration...");
         uint16_t reference = scd30_clamp_frc_reference(SCD30_FRC_REFERENCE_PPM);
-        esp_err_t frc_err = scd30_frc_with_sensirion_procedure(reference);
+        esp_err_t frc_err = scd30_frc_at_reference_interval(reference);
         if (frc_err != ESP_OK) {
             ESP_LOGE(TAG, "Forced recalibration FAILED (err %d) - retry manually next boot", frc_err);
         } else {
@@ -406,7 +423,7 @@ static void scd30_task(void *pvParameters) {
         if (load_err == ESP_OK && scd30_ppm_is_plausible((float)last_known_ppm)) {
             ESP_LOGW(TAG, "Self-heal: waiting 2 minutes before reasserting last known CO2 (%" PRId32 " ppm)...", last_known_ppm);
             uint16_t reference = scd30_clamp_frc_reference((float)last_known_ppm);
-            esp_err_t frc_err = scd30_frc_with_sensirion_procedure(reference);
+            esp_err_t frc_err = scd30_frc_at_normal_interval(reference);
             if (frc_err == ESP_OK) {
                 ESP_LOGI(TAG, "Self-heal recalibration to %d ppm: OK", reference);
                 calibration_trusted = true;
@@ -471,7 +488,7 @@ static volatile bool frc_trigger_in_progress = false;
 static void frc_manual_trigger_task(void *pvParameters) {
     ESP_LOGW(TAG, "Zigbee-triggered FRC: waiting 2 minutes at 2 s interval for stable readings...");
     uint16_t reference = scd30_clamp_frc_reference(SCD30_FRC_REFERENCE_PPM);
-    esp_err_t frc_err = scd30_frc_with_sensirion_procedure(reference);
+    esp_err_t frc_err = scd30_frc_at_reference_interval(reference);
     if (frc_err == ESP_OK) {
         ESP_LOGW(TAG, "Zigbee-triggered FRC to %d ppm: OK", reference);
         if (scd30_cal_save_last_co2(reference) == ESP_OK) {

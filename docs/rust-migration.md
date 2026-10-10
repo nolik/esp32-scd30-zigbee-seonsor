@@ -46,6 +46,7 @@ and do not carry over.
 | Q24–Q27 | Ran controlled power-cut experiments before porting the self-heal | The whole self-heal design hinged on the "defect" claim |
 | Q28 | Production restored; diagnostic firmware kept on local branch `diag/scd30-persistence` (build machine only) | |
 | Q29 | ASC **permanently off** (read at boot, written only if on); every FRC uses Sensirion's procedure (2 s interval for 2 min, FRC, back to 15 s). Applied to C++ now and to the Rust parity spec | Boot FRC always overrides ASC; FRC accuracy per datasheet |
+| Q31/Q32 | Sensor interval **15 s** normally (ensure-at-boot). **Manual reference FRC** (Zigbee switch) at 2 s: switch, wait 2 min, FRC, back to 15 s. **Boot self-heal FRC at 15 s** (wait 2 min, FRC). Temperature offset 320 (ensure-at-boot) | User preference for 15 s operation. Interval change shifts CO2 ~7 ppm (measured 2↔15 s, 2↔5 s), so a self-heal at 2 s would drift readings ~7 ppm lower per reboot. Accepted: after a manual 2 s FRC the 15 s readings sit ~7 ppm below the reference (constant) |
 | Q30 | Defect evidence written up for a warranty claim (`docs/scd30-defect-evidence.md`); in Rust the self-heal sits behind a config flag (default on) | A replacement unit makes self-heal optional |
 
 ## Facts established
@@ -108,17 +109,19 @@ Rollback flashes `cpp-final` with its own `partitions.csv`; app lands at `0x1000
 
 **SCD30** — I2C addr `0x61`, SDA `GPIO21`, SCL `GPIO7` (never `GPIO0`), 100 kHz,
 internal pull-ups, glitch filter 7.
-- Boot: read firmware version (log), set interval 15 s, read ASC and write it **off** only if
-  on (Q29), start continuous measurement (pressure arg 0); each retried with backoff
-  200 ms (<10 tries) / 2 s, full bus recovery every 5 failures.
-- **FRC procedure** (all FRCs, Q29): set interval 2 s, wait 120 s, FRC, restore 15 s.
+- Boot: read firmware version (log); **ensure** (read, write only if different) interval = 15 s,
+  ASC = 0, temperature offset = 320 (Q29/Q32); start continuous measurement (pressure arg 0);
+  each retried with backoff 200 ms (<10 tries) / 2 s, full bus recovery every 5 failures.
+  Leave ≥ 10 ms between commands - back-to-back writes get NACKed.
+- **FRC procedures** (Q32): self-heal = wait 120 s at 15 s, FRC. Manual reference FRC = set
+  interval 2 s, wait 120 s, FRC, ≥ 10 ms gap, set interval 15 s.
 - Self-heal (behind config flag, default on — Q30): load NVS `scd30_cal`/`last_co2` (`i32`);
   if present and plausible (300–10000 ppm) run the FRC procedure with the value clamped
   400–2000, mark trusted on success.
 - Loop every 15 s: data-ready → read (CRC-8 0x31/0xFF per word) → set attributes;
   if trusted and plausible, save rounded ppm to NVS every 20th reading; bus recovery
   after 5 consecutive failures.
-- Zigbee switch ON (ignored if already in progress): FRC procedure to 425 ppm
+- Zigbee switch ON (ignored if already in progress): manual reference FRC procedure to 425 ppm
   (`SCD30_FRC_REFERENCE_PPM`), save 425 to NVS, write On/Off back to `0`. No ASC toggling.
 - Log strings referenced by the README are kept verbatim (e.g.
   `Saved %d ppm as new self-heal reference`, `Self-heal recalibration to %d ppm: OK`).
