@@ -1,5 +1,9 @@
 # ESP32-C6 + SCD30 Zigbee CO2/Temperature/Humidity Sensor
 
+> **Repository layout (migration in progress):** `legacy-cpp/` holds the C++ firmware (rollback,
+> tag `cpp-final`); `logic/` + `firmware/` hold the Rust firmware; decisions in
+> `docs/rust-migration.md`. Build/flash steps below still describe the C++ firmware until Task 12.
+
 DIY Zigbee end device built on ESP-IDF, exposing CO2 (SCD30, NDIR), temperature,
 humidity, and a "Trigger Recalibration" switch to Zigbee2MQTT / Home Assistant.
 
