@@ -168,3 +168,14 @@ internal pull-ups, glitch filter 7.
   new designs. Unpinned versions resolve to 2.x. <https://github.com/espressif/esp-zigbee-sdk>
 - libscd 0.5.1 — sync + async SCD30, FRC/ASC/interval. <https://github.com/SvetlinZarev/libscd>
 - Binary size unmeasured; reference projects use 1.5–3 MB app partitions.
+
+## Soak log
+Start: 2026-10-10 20:41 (CEST), firmware `c5af100` (Rust, default features). Reference
+Recalibration done indoors at 20:40 (Stored Reference 425 → 417 at 15 s); readings ~14 ppm high
+vs. a real outdoor calibration until the next Reference Recalibration at a window.
+- [ ] No attribute stuck > 2 min (HA history: co2/temperature/humidity)
+- [ ] Zero I2C errors (`Failed to`, `bus/device reset` in serial log, if a logger runs)
+- [ ] No unplanned reboots (Z2M last_seen gaps; HA shows temperature `0` placeholder only after planned boots)
+- [ ] CO2 daily pattern plausible vs previous C++ week
+- [ ] Deliberate power cycle mid-week: Self-Heal re-applies the Stored Reference (one 2-min gap, then values near the pre-cut level)
+- [ ] Verdict → delete `legacy-cpp/` (needs user approval; rollback stays possible via tag `cpp-final`)
