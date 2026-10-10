@@ -117,9 +117,17 @@ a quick check if redoing this far in the future.
 
 ASC (automatic self-calibration) is kept **permanently off**: the boot-time FRC
 always overrides it on this unit, so running both only lets them fight. The
-firmware reads the ASC state at boot and writes it off only if found on. Every
-FRC (seeding, self-heal, Zigbee switch) follows Sensirion's procedure: 2 s
-measurement interval for 2 minutes, FRC, then back to 15 s.
+firmware reads the ASC state at boot and writes it off only if found on.
+
+Measurement interval: the sensor runs at **15 s** normally. A **manual reference FRC**
+(Zigbee switch or `SCD30_PERFORM_FRC` seeding) follows Sensirion's procedure: switch to
+2 s, 2 minutes of measurements, FRC, back to 15 s. The **boot self-heal FRC stays at
+15 s**: on this unit any interval change shifts CO2 by ~7 ppm (measured 2026-10-10, 10
+switches against 5 s and 15 s), and the self-heal replays a value measured at 15 s -
+doing it at 2 s would push readings ~7 ppm lower on every reboot. Consequence of the
+2 s manual FRC: afterwards the 15 s readings sit ~7 ppm below the reference (constant,
+well inside the +-30 ppm spec). The sensor's temperature offset
+(`SCD30_TEMPERATURE_OFFSET_CENTI_C`, also corrects humidity) is set for 15 s operation.
 
 You can also trigger a fresh FRC any time from Home Assistant/Zigbee2MQTT
 (see below) instead of editing/reflashing - flip the exposed **Trigger
@@ -274,10 +282,11 @@ the (nice-to-have) lower-latency push behavior.
 
 | Constant | Purpose |
 |---|---|
-| `SCD30_MEASUREMENT_INTERVAL_SECONDS` (15) | SCD30 internal measurement + reporting poll interval |
+| `SCD30_MEASUREMENT_INTERVAL_SECONDS` (15) | SCD30 internal measurement interval + firmware read/report interval; also used for the boot self-heal FRC |
+| `SCD30_FRC_INTERVAL_SECONDS` (2) | Interval used for the 2 minutes before a manual reference FRC (then back to 15 s) |
+| `SCD30_TEMPERATURE_OFFSET_CENTI_C` (320) | Sensor-side self-heating correction (ensured at boot); refine against a reference thermometer: `(SCD30 - reference) * 100 + current` after ~10 min |
 | `SCD30_PERFORM_FRC` | Set `true` once, outdoors, to (re)seed calibration; `false` for normal operation |
 | `SCD30_FRC_REFERENCE_PPM` (425) | Assumed outdoor CO2 ppm for manual FRC - check/update periodically |
-| `SCD30_FRC_INTERVAL_SECONDS` (2) | Measurement interval used for the 2 minutes before every FRC (Sensirion procedure) |
 | `SCD30_FRC_MIN_PPM` / `MAX_PPM` (400-2000) | FRC command's own documented valid input range |
 | `SCD30_PLAUSIBLE_MIN_PPM` / `MAX_PPM` (300-10000) | Sanity bounds for self-heal save/reassert, matching the sensor's accuracy-guaranteed range |
 | `SCD30_SAVE_INTERVAL_READINGS` (20, ~5 min) | How often a trusted live reading updates the self-heal reference in NVS |
