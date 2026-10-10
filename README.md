@@ -1,8 +1,8 @@
 # ESP32-C6 + SCD30 Zigbee CO2/Temperature/Humidity Sensor
 
 > **Repository layout:** `firmware/` (ESP-IDF `std` Rust, Zigbee via ZBOSS FFI) + `logic/`
-> (hardware-free, host-tested) are the firmware. `legacy-cpp/` is the previous C++ firmware, kept for
-> rollback (tag `cpp-final`) until the soak completes. Glossary: `CONTEXT.md`; decisions:
+> (hardware-free, host-tested) are the firmware. The previous C++ firmware lives in git history at
+> tag `cpp-final` (see Rollback below). Glossary: `CONTEXT.md`; decisions:
 > `docs/rust-migration.md`, `docs/adr/`.
 
 DIY Zigbee end device built on ESP-IDF, exposing CO2 (SCD30, NDIR), temperature,
@@ -59,8 +59,16 @@ partitions with `factory` at `0x00120000`.
 ./scripts/flash.sh --monitor  # same, then serial monitor (needs an interactive terminal)
 ```
 **Never erase flash** (`espflash erase-flash`, `--erase-parts`): it destroys the pairing and the
-Stored Reference. Rollback to C++: `legacy-cpp/README.md` (tag `cpp-final`); it reads the same
 Stored Reference.
+
+**Rollback to the C++ firmware** (it reads the same pairing and Stored Reference):
+```
+git worktree add /tmp/cpp-final cpp-final && cd /tmp/cpp-final
+nix --experimental-features 'nix-command flakes' develop github:mirrexagon/nixpkgs-esp-dev/5287d6e1ca9e15ebd5113c41b9590c468e1e001b#esp32c6-idf
+idf.py -p /dev/serial/by-id/usb-Espressif_USB_JTAG_serial_debug_unit_A0:F2:62:45:CE:34-if00 flash
+```
+Do **not** run `idf.py set-target` there: it regenerates `sdkconfig` and drops the custom
+partition table (the device then boot-loops on a missing `zb_storage`).
 
 ---
 
@@ -181,7 +189,7 @@ involving it can overflow. Cosmetic tradeoff: during the ~2 minute self-heal
 window, temperature briefly shows `0.00C` instead of `null`/unavailable -
 minor, and self-corrects automatically once the first real reading lands.
 
-A one-time diagnostic in the C++ firmware (`log_attribute_reporting_flags()` in `legacy-cpp/main/main.cpp`,
+A one-time diagnostic in the C++ firmware (`log_attribute_reporting_flags()` in `main/main.cpp` at tag `cpp-final`,
 logged once at boot as `Attr check [...]`) confirmed all four attributes
 correctly carry the ZCL `REPORTING` access flag, ruling out a simpler
 "attribute not marked reportable" explanation before the real cause was found.
