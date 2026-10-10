@@ -25,9 +25,7 @@ Everything (Rust nightly, ESP-IDF v5.3.3, `espflash`, `ldproxy`, `mosquitto`, `j
 ```
 nix --experimental-features 'nix-command flakes' develop
 ```
-The ESP32-C6 shows up as
-`/dev/serial/by-id/usb-Espressif_USB_JTAG_serial_debug_unit_A0:F2:62:45:CE:34-if00` (the
-`ttyACM` number changes). Each re-plug resets its permissions: `sudo chmod 666 /dev/ttyACM*`, or
+The ESP32-C6 Each re-plug resets its permissions: `sudo chmod 666 /dev/ttyACM*`, or
 add your user to the `dialout` group. **Never point tools at `/dev/ttyUSB0` - that is the
 Zigbee2MQTT coordinator.**
 
@@ -106,7 +104,7 @@ returns to 15 s, saves the Stored Reference and resets the switch to off.
 
 ## 5. Zigbee2MQTT external converter (NixOS)
 
-The device identifies itself as manufacturer `Nolik`, model
+The device model
 `ESP32C6-SCD30-Zigbee`. Without the converter, Z2M shows it as "Unsupported" /
 "Automatically generated definition" and CO2 will show a fixed wrong value
 (the raw ZCL fraction misinterpreted) with temperature/humidity/switch not
