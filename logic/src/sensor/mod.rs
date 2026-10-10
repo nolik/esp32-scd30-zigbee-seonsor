@@ -212,10 +212,10 @@ impl<S: Scd30, St: StoredReference, R: Reporter, C: Clock> SensorService<S, St, 
                     );
                     self.maybe_save_reference(reading.co2_ppm);
                 }
-                Err(_) => self.note_failure("Failed to read SCD30 measurement"),
+                Err(e) => self.note_failure(&format!("Failed to read SCD30 measurement: {e:?}")),
             },
             Ok(false) => {}
-            Err(_) => self.note_failure("Failed to query SCD30 data-ready status"),
+            Err(e) => self.note_failure(&format!("Failed to query SCD30 data-ready status: {e:?}")),
         }
     }
 

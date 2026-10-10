@@ -15,8 +15,11 @@ self-heal = []
 
 [dependencies]
 anyhow = "1"
+embedded-hal = "1.0"
 esp-idf-svc = "0.51"
+libscd = { version = "0.5.1", features = ["sync", "scd30"] }
 log = "0.4"
+logic = { path = "../logic" }
 
 [build-dependencies]
 embuild = "0.33"
