@@ -54,6 +54,7 @@ and do not carry over.
 | Q33 | Accept `libscd` truncating CO2 to whole ppm (≤ 1 ppm low) | Well under ±30 ppm spec; converter rounds to ppm anyway |
 | Q34 | ADRs for the three surprising, hard-to-reverse trade-offs: `docs/adr/0001` ZBOSS v1 via FFI, `0002` partition gap, `0003` Self-Heal 15 s vs Reference Recalibration 2 s | Stop future "fixes" that break pairing or reintroduce drift |
 | Q35 | Implementation on branch `rust-migration` from `main` after PR #1; native execution in one session; standing permission to flash firmware during execution (never erase, never `/dev/ttyUSB0`, ask before recalibrating or physical steps) | Hardware steps need the user in the loop |
+| Q36 | C++ code removed in the Rust migration PR (supersedes Q7's `legacy-cpp/` and M5's "delete after soak"). Recovery: tag `cpp-final` = the last C++ state on `main` (PR #2) | Git history + tag is the rollback; no need to carry dead code; soak stays as a quality check |
 | Q30 | Defect evidence written up (`docs/scd30-defect-evidence.md`); in Rust the self-heal sits behind a config flag (default on). Unit bought on AliExpress (possibly a clone): **no warranty claim** | A replacement unit from an authorized distributor makes self-heal optional |
 
 ## Facts established
@@ -143,7 +144,7 @@ internal pull-ups, glitch filter 7.
   Rollback rehearsal (Q20) here.
 - **M3 Clusters** — all four clusters report via unmodified converter; contract diff (Q19).
 - **M4 FRC switch** — channel to sensor thread, auto-reset.
-- **M5 Soak** — 7 days, then delete `legacy-cpp/`.
+- **M5 Soak** — 7 days (C++ already removed; rollback via tag `cpp-final`, Q36).
 
 ## Soak criteria (Q21)
 
@@ -178,4 +179,4 @@ vs. a real outdoor calibration until the next Reference Recalibration at a windo
 - [ ] No unplanned reboots (Z2M last_seen gaps; HA shows temperature `0` placeholder only after planned boots)
 - [ ] CO2 daily pattern plausible vs previous C++ week
 - [ ] Deliberate power cycle mid-week: Self-Heal re-applies the Stored Reference (one 2-min gap, then values near the pre-cut level)
-- [ ] Verdict → delete `legacy-cpp/` (needs user approval; rollback stays possible via tag `cpp-final`)
+- [ ] Verdict (pass → done; fail → roll back to tag `cpp-final`, see README "Rollback")
