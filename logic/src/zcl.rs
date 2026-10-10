@@ -29,13 +29,21 @@ pub struct Report {
     pub humidity: HumidityCenti,
 }
 
+/// Value ranges declared for the clusters (zb.rs uses the same constants).
+pub const CO2_MAX_FRACTION: f32 = 0.01; // 10000 ppm
+pub const TEMP_MIN_CENTI: i16 = -4000;
+pub const TEMP_MAX_CENTI: i16 = 8500;
+pub const HUMIDITY_MAX_CENTI: u16 = 10_000;
+
 impl Report {
-    /// Truncating, saturating conversion (Rust `as`), matching the C++ casts without UB.
+    /// Truncating conversion clamped to the declared ranges, so a garbage float can never
+    /// produce the 0x8000 temperature sentinel or an out-of-range value.
     pub fn from_reading(r: &Reading) -> Self {
+        let centi = |v: f32| (v * 100.0) as i32; // saturating; NaN -> 0
         Self {
-            co2: Co2Fraction(r.co2_ppm / 1_000_000.0),
-            temperature: TempCenti((r.temperature_c * 100.0) as i16),
-            humidity: HumidityCenti((r.humidity_pct * 100.0) as u16),
+            co2: Co2Fraction((r.co2_ppm / 1_000_000.0).clamp(0.0, CO2_MAX_FRACTION)),
+            temperature: TempCenti(centi(r.temperature_c).clamp(TEMP_MIN_CENTI.into(), TEMP_MAX_CENTI.into()) as i16),
+            humidity: HumidityCenti(centi(r.humidity_pct).clamp(0, HUMIDITY_MAX_CENTI.into()) as u16),
         }
     }
 }
@@ -74,7 +82,19 @@ mod tests {
         let r = Report::from_reading(&reading(f32::NAN, f32::NAN, -3.0));
         assert_eq!(r.temperature, TempCenti(0));
         assert_eq!(r.humidity, HumidityCenti(0));
-        assert_eq!(Report::from_reading(&reading(425.0, 400.0, 900.0)).temperature, TempCenti(i16::MAX));
+    }
+
+    #[test]
+    fn garbage_is_clamped_to_the_declared_cluster_ranges() {
+        // A CRC-valid garbage float must never produce the banned 0x8000 temperature sentinel.
+        let low = Report::from_reading(&reading(f32::INFINITY, f32::NEG_INFINITY, f32::INFINITY));
+        assert_eq!(low.temperature, TempCenti(-4000));
+        assert_eq!(low.humidity, HumidityCenti(10_000));
+        assert_eq!(low.co2, Co2Fraction(0.01));
+        let high = Report::from_reading(&reading(-5.0, 400.0, -3.0));
+        assert_eq!(high.temperature, TempCenti(8500));
+        assert_eq!(high.humidity, HumidityCenti(0));
+        assert_eq!(high.co2, Co2Fraction(0.0));
     }
 
     #[test]
