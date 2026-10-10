@@ -75,5 +75,6 @@ Times are local (CEST), 2026-10-10. Test #3 follows Sensirion's stated precondit
 ## Workaround in firmware
 
 The firmware stores the last trusted CO2 reading in ESP32 NVS every ~5 min. At boot
-it re-applies FRC with that value, at a 2 s interval after 2 min of settling. The
-accuracy is limited by how much the room's CO2 changed during the outage.
+it re-applies FRC with that value after 2 min of settling at the normal 15 s interval - the
+interval the value was measured at (a 2 s Self-Heal would shift readings ~7 ppm per reboot,
+see `docs/adr/0003`). The accuracy is limited by how much the room's CO2 changed during the outage.
