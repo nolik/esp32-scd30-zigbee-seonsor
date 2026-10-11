@@ -3,7 +3,7 @@
   "source": "zigbee2mqtt/bridge/devices (Z2M 2.7.0), C++ firmware 8e29f0f",
   "friendly_name": "CO2 sensor",
   "ieee_address": "0xa0f262fffe45ce34",
-  "type": "EndDevice",
+  "type": "Router",
   "manufacturer": "Nolik",
   "model_id": "ESP32C6-SCD30-Zigbee",
   "power_source": "Mains (single phase)",

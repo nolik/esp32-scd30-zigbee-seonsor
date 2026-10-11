@@ -56,6 +56,7 @@ and do not carry over.
 | Q35 | Implementation on branch `rust-migration` from `main` after PR #1; native execution in one session; standing permission to flash firmware during execution (never erase, never `/dev/ttyUSB0`, ask before recalibrating or physical steps) | Hardware steps need the user in the loop |
 | Q36 | C++ code removed in the Rust migration PR (supersedes Q7's `legacy-cpp/` and M5's "delete after soak"). Recovery: tag `cpp-final` = the last C++ state on `main` (PR #2) | Git history + tag is the rollback; no need to carry dead code; soak stays as a quality check |
 | Q30 | Defect evidence written up (`docs/scd30-defect-evidence.md`); in Rust the self-heal sits behind a config flag (default on). Unit bought on AliExpress (possibly a clone): **no warranty claim** | A replacement unit from an authorized distributor makes self-heal optional |
+| Q37 | Role **router** instead of ZED (2026-10-11; supersedes the parity spec's ZED role). One re-pair: clear `zb_storage` once, `nvs` kept | As a ZED the TS011F plug aged it out 64 min after every join and it never rejoined; C++ did the same. Mains-powered, so a router costs nothing ([ADR 0004](adr/0004-zigbee-router-not-end-device.md)) |
 
 ## Facts established
 
@@ -102,7 +103,8 @@ Rollback flashes `cpp-final` with its own `partitions.csv`; app lands at `0x1000
 
 **Zigbee identity / config** (must match `docs/z2m-baseline.json`)
 - Role ZED, `install_code_policy=false`, `ed_timeout=ESP_ZB_ED_AGING_TIMEOUT_64MIN`,
-  `keep_alive=3000`, channel mask `ESP_ZB_TRANSCEIVER_ALL_CHANNELS_MASK`.
+  `keep_alive=3000`, channel mask `ESP_ZB_TRANSCEIVER_ALL_CHANNELS_MASK`. Since Q37 the role is
+  router (`max_children=10`); the ED timeout settings are gone.
 - Endpoint 1, profile HA, device id `ESP_ZB_HA_TEMPERATURE_SENSOR_DEVICE_ID`, version 0.
 - Server clusters: Basic (ZCL version default, power source default, manufacturer
   `Nolik`, model `ESP32C6-SCD30-Zigbee` as ZCL Pascal strings), Identify (default

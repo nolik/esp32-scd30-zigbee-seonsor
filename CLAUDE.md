@@ -2,7 +2,7 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-ESP32-C6 + Sensirion SCD30 Zigbee end device (CO2 / temperature / humidity) in Rust, paired with
+ESP32-C6 + Sensirion SCD30 Zigbee router (CO2 / temperature / humidity) in Rust, paired with
 Zigbee2MQTT + Home Assistant. Domain terms (Self-Heal, Reference Recalibration, FRC, Stored
 Reference, Trusted Session, Post-FRC Transient, Measurement Interval, Report Period) are defined in
 `CONTEXT.md` — use them in code, docs and commit messages.
@@ -51,12 +51,14 @@ ssh use a small pyserial reader in `nix shell` (opening the port can reset the E
 - Preserve the device's state across flashes: flash only with `scripts/flash.sh` (no erase), keep
   `firmware/partitions.csv` offsets (`nvs`, `zb_storage`, `zb_fct`), keep NVS keys `scd30_cal`/`last_co2`
   (i32), and keep `EspDefaultNvsPartition::take_with(false)`. Losing them means a Zigbee re-pair and
-  a Reference Recalibration.
+  a Reference Recalibration. The one deliberate exception: a Zigbee role change clears only
+  `zb_storage` once (README "Changing the Zigbee role").
 - The ESP32 port is `/dev/serial/by-id/usb-Espressif_USB_JTAG_serial_debug_unit_A0:F2:62:45:CE:34-if00`;
   `/dev/ttyUSB0` on the host is the Zigbee2MQTT coordinator — leave it alone. After a replug the
   port needs `sudo chmod 666 /dev/ttyACM*` (user action).
 - The Zigbee identity is a frozen contract with `esp32c6_scd30_converter.js` and
-  `docs/z2m-baseline.json` (manufacturer `Nolik`, model `ESP32C6-SCD30-Zigbee`, endpoint 1, clusters).
+  `docs/z2m-baseline.json` (manufacturer `Nolik`, model `ESP32C6-SCD30-Zigbee`, endpoint 1, clusters,
+  role router - ADR 0004: as an end device its plug parent dropped it every 64 min).
 - Self-Heal runs at the 15 s Measurement Interval; only Reference Recalibration switches to 2 s
   (ADR 0003 — an interval change shifts CO2 ~7 ppm on this unit).
 - ZBOSS is pinned (`esp-zigbee-lib ==1.6.8`, `esp-zboss-lib ==1.6.4`); `firmware/Cargo.lock` and
