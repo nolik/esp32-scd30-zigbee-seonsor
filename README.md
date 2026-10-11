@@ -5,7 +5,7 @@
 > tag `cpp-final` (see Rollback below). Glossary: `CONTEXT.md`; decisions:
 > `docs/rust-migration.md`, `docs/adr/`.
 
-DIY Zigbee end device built on ESP-IDF, exposing CO2 (SCD30, NDIR), temperature,
+DIY Zigbee router built on ESP-IDF, exposing CO2 (SCD30, NDIR), temperature,
 humidity, and a "Trigger Recalibration" switch to Zigbee2MQTT / Home Assistant.
 
 ## Hardware
@@ -58,6 +58,16 @@ partitions with `factory` at `0x00120000`.
 ```
 **Never erase flash** (`espflash erase-flash`, `--erase-parts`): it destroys the pairing and the
 Stored Reference.
+
+**Changing the Zigbee role** (end device <-> router, [ADR 0004](docs/adr/0004-zigbee-router-not-end-device.md);
+also needed for a rollback to `cpp-final` from a router build) needs a fresh join. Clear only
+`zb_storage` once, then flash. `nvs` (Stored Reference) stays, and so does the Z2M entry (same IEEE):
+```
+cd firmware && espflash erase-parts --chip esp32c6 --partition-table partitions.csv \
+  --port /dev/serial/by-id/usb-Espressif_USB_JTAG_serial_debug_unit_A0:F2:62:45:CE:34-if00 zb_storage
+cd .. && ./scripts/flash.sh
+```
+Z2M must allow joining (`permit_join`); it re-interviews and reconfigures the device on its own.
 
 **Rollback to the C++ firmware** (it reads the same pairing and Stored Reference):
 ```

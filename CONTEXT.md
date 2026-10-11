@@ -1,6 +1,6 @@
 # SCD30 Zigbee CO2 Sensor
 
-A DIY Zigbee end device that measures CO2, temperature and humidity with a Sensirion SCD30.
+A DIY Zigbee device (a router) that measures CO2, temperature and humidity with a Sensirion SCD30.
 Its SCD30 unit forgets its calibration on every power loss, and the firmware compensates for that.
 
 ## Language

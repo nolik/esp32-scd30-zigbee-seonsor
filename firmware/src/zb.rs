@@ -30,7 +30,9 @@ const SERVER_ROLE: u8 = 0x01;
 const ZCL_TYPE_BOOL: u32 = 0x10;
 const ZCL_STATUS_SUCCESS: u32 = 0x00;
 const ALL_CHANNELS_MASK: u32 = 0x07FF_F800;
-const ED_KEEP_ALIVE_MS: u32 = 3000;
+// Router, not end device: an end device's parent (the TS011F plug here) dropped it after the
+// 64-min aging timeout and it never rejoined (ADR 0004). 10 = the SDK examples' value.
+const MAX_CHILDREN: u8 = 10;
 // Task 9 Step 1: values of ESP_ZB_ZCL_BASIC_{ZCL_VERSION,POWER_SOURCE}_DEFAULT_VALUE.
 const BASIC_ZCL_VERSION: u8 = 0x08;
 const BASIC_POWER_SOURCE: u8 = 0x00; // SDK default, same as the C++ firmware (Z2M shows mains via node descriptor)
@@ -62,10 +64,9 @@ pub fn start(recalibration_requests: Sender<()>) -> anyhow::Result<()> {
 
 unsafe fn run_stack() {
     let mut cfg: ffi::esp_zb_cfg_t = core::mem::zeroed();
-    cfg.esp_zb_role = ffi::esp_zb_nwk_device_type_t_ESP_ZB_DEVICE_TYPE_ED as _;
+    cfg.esp_zb_role = ffi::esp_zb_nwk_device_type_t_ESP_ZB_DEVICE_TYPE_ROUTER as _;
     cfg.install_code_policy = false;
-    cfg.nwk_cfg.zed_cfg.ed_timeout = ffi::esp_zb_aging_timeout_t_ESP_ZB_ED_AGING_TIMEOUT_64MIN as _;
-    cfg.nwk_cfg.zed_cfg.keep_alive = ED_KEEP_ALIVE_MS as _;
+    cfg.nwk_cfg.zczr_cfg.max_children = MAX_CHILDREN;
     ffi::esp_zb_init(&mut cfg);
 
     esp!(ffi::esp_zb_device_register(build_endpoint())).expect("esp_zb_device_register");

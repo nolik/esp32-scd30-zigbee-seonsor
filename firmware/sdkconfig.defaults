@@ -9,7 +9,7 @@ CONFIG_PARTITION_TABLE_CUSTOM=y
 # esp-idf-sys resolves this relative to target/<triple>/<profile>/build/esp-idf-sys-*/out
 CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="../../../../../../partitions.csv"
 
-# Same ZBOSS library flavour as the C++ firmware (ZCZR lib, used in ED role)
+# ZCZR library: the device runs as a Zigbee router (ADR 0004)
 CONFIG_ZB_ENABLED=y
 CONFIG_ZB_ZCZR=y
 CONFIG_ZB_RADIO_NATIVE=y
