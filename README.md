@@ -67,7 +67,15 @@ cd firmware && espflash erase-parts --chip esp32c6 --partition-table partitions.
   --port /dev/serial/by-id/usb-Espressif_USB_JTAG_serial_debug_unit_A0:F2:62:45:CE:34-if00 zb_storage
 cd .. && ./scripts/flash.sh
 ```
-Z2M must allow joining (`permit_join`); it re-interviews and reconfigures the device on its own.
+Then, on the host:
+```
+mosquitto_pub -h localhost -t zigbee2mqtt/bridge/request/permit_join -m '{"time":180}'  # Z2M 2.x ignores permit_join in its config
+# after the "device_announce" event (Z2M treats it as a known device, so it neither interviews nor configures):
+./scripts/z2m-contract.sh --reinterview > /tmp/contract.json
+mosquitto_pub -h localhost -t zigbee2mqtt/bridge/request/device/configure -m '{"id":"CO2 sensor"}'
+```
+Without the configure step the device has no reporting bindings (they lived in `zb_storage`) and
+sends nothing.
 
 **Rollback to the C++ firmware** (it reads the same pairing and Stored Reference):
 ```

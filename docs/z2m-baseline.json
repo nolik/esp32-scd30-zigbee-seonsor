@@ -73,6 +73,16 @@
           "reportable_change": 0.00001
         }
       ]
+    },
+    "242": {
+      "bindings": [],
+      "clusters": {
+        "input": [],
+        "output": [
+          "greenPower"
+        ]
+      },
+      "configured_reportings": []
     }
   }
 }
