@@ -2,14 +2,15 @@
 
 /// Normal SCD30 Measurement Interval; also the firmware's Report Period.
 pub const MEASUREMENT_INTERVAL_S: u16 = 15;
-/// Measurement Interval for the 2 minutes before a Reference Recalibration (Sensirion procedure).
-pub const FRC_INTERVAL_S: u16 = 2;
 /// Sensor-side self-heating correction for 15 s operation (also corrects humidity).
 pub const TEMPERATURE_OFFSET_CENTI_C: u16 = 320;
 /// Assumed outdoor CO2 for a Reference Recalibration.
 pub const FRC_REFERENCE_PPM: u16 = 425;
 /// Sensirion: >= 2 minutes of measurements before FRC.
 pub const SELF_HEAL_WAIT_MS: u64 = 120_000;
+/// Reference Recalibration waits longer: at 15 s the SCD30 needs ~5 min to take in the window air
+/// fully, and the ×50 Broken sensor adjustments turn 1 ppm left over into 50 ppm.
+pub const REFERENCE_RECALIBRATION_WAIT_MS: u64 = 300_000;
 /// Persist a trusted reading as the Stored Reference every N readings (~5 min at 15 s).
 pub const SAVE_EVERY_READINGS: u32 = 20;
 /// Tear down and recreate the I2C bus after this many consecutive read failures.

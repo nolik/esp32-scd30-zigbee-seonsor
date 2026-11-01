@@ -117,7 +117,8 @@ impl<S: Scd30, St: StoredReference, R: Reporter, C: Clock> SensorService<S, St, 
             Ok((major, minor)) => log::info!("SCD30 firmware version: {major}.{minor}"),
             Err(_) => log::warn!("Failed to read SCD30 firmware version"),
         }
-        // A power cut during a Reference Recalibration leaves the sensor at 2 s; this restores 15 s.
+        // Firmware before the 15 s Reference Recalibration could leave the sensor at 2 s after a
+        // power cut; this restores 15 s.
         self.ensure(Setting::MeasurementInterval, MEASUREMENT_INTERVAL_S);
         // ASC stays off: the boot self-heal FRC always overrides it on this unit.
         self.ensure(Setting::AutoSelfCalibration, 0);
@@ -259,8 +260,8 @@ impl<S: Scd30, St: StoredReference, R: Reporter, C: Clock> SensorService<S, St, 
         }
     }
 
-    /// Zigbee "Trigger Recalibration" switch turned on: reference FRC per Sensirion -
-    /// 2 s interval, 2 minutes of measurements, FRC to 425 ppm, back to 15 s.
+    /// Zigbee "Trigger Recalibration" switch turned on: 5 minutes of measurements, then FRC to
+    /// 425 ppm - at the normal 15 s interval, so the readings afterwards stay at 425 (ADR 0005).
     pub fn request_reference_recalibration(&mut self) -> bool {
         if self.recalibration != Recalibration::Idle {
             log::warn!("Recalibration already in progress - ignoring trigger");
@@ -273,11 +274,8 @@ impl<S: Scd30, St: StoredReference, R: Reporter, C: Clock> SensorService<S, St, 
             log::warn!("Reference Recalibration supersedes the pending Self-Heal");
             self.self_heal = SelfHeal::Inactive;
         }
-        log::warn!("Zigbee-triggered FRC: waiting 2 minutes at 2 s interval for stable readings...");
-        self.retry("SCD30 set_measurement_interval (FRC)", |s| {
-            s.write_setting(Setting::MeasurementInterval, FRC_INTERVAL_S)
-        });
-        self.recalibration = Recalibration::Settling { due_ms: self.clock.now_ms() + SELF_HEAL_WAIT_MS };
+        log::warn!("Zigbee-triggered FRC: waiting 5 minutes for stable readings...");
+        self.recalibration = Recalibration::Settling { due_ms: self.clock.now_ms() + REFERENCE_RECALIBRATION_WAIT_MS };
         true
     }
 
@@ -286,10 +284,6 @@ impl<S: Scd30, St: StoredReference, R: Reporter, C: Clock> SensorService<S, St, 
         let reference = FRC_REFERENCE_PPM;
         let result = self.sensor.force_recalibration(reference);
         self.discard_next_reading = true; // Post-FRC Transient
-        self.clock.sleep_ms(COMMAND_GAP_MS);
-        self.retry("SCD30 set_measurement_interval (normal)", |s| {
-            s.write_setting(Setting::MeasurementInterval, MEASUREMENT_INTERVAL_S)
-        });
         match result {
             Ok(()) => {
                 log::warn!("Zigbee-triggered FRC to {reference} ppm: OK");

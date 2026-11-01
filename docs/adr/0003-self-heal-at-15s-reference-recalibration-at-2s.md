@@ -1,5 +1,7 @@
 # Self-Heal runs at the 15 s Measurement Interval, Reference Recalibration at 2 s
 
+**Superseded by [ADR 0005](0005-reference-recalibration-at-15s.md)** (2026-11-01): both now run at 15 s.
+
 On this SCD30 unit, changing the Measurement Interval shifts CO2 readings by about 7 ppm (measured
 2026-10-10, 10 switches between 2 s, 5 s and 15 s). Normal operation uses 15 s. A Reference
 Recalibration follows Sensirion's procedure (2 s for 2 minutes, FRC, back to 15 s). Self-Heal
