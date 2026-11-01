@@ -41,7 +41,10 @@ fn run_sensor(
                 return;
             }
         };
-        let config = Config { self_heal_enabled: cfg!(feature = "self-heal") };
+        let config = Config {
+            self_heal_enabled: cfg!(feature = "self-heal"),
+            broken_sensor_adjustment: cfg!(feature = "broken-sensor-adjustment"),
+        };
         let mut service = SensorService::new(sensor, store, reporter, clock::SystemClock::new(), config);
         service.boot();
         loop {

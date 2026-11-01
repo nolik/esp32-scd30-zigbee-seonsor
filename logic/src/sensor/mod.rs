@@ -1,5 +1,6 @@
 //! SCD30 service: owns the sensor exclusively (one thread), runs boot setup, the boot
 //! self-heal FRC, the manual reference FRC and the periodic read/report/save loop.
+use crate::broken_sensor::BrokenSensorCo2;
 use crate::calib::*;
 use crate::zcl::{Reading, Report};
 
@@ -54,6 +55,8 @@ pub trait Clock {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Config {
     pub self_heal_enabled: bool,
+    /// Broken sensor adjustments: scale the reported CO2 (see `broken_sensor`).
+    pub broken_sensor_adjustment: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -80,6 +83,7 @@ pub struct SensorService<S, St, R, C> {
     trusted_readings: u32,
     consecutive_failures: u32,
     discard_next_reading: bool,
+    broken_sensor_co2: Option<BrokenSensorCo2>,
 }
 
 impl<S: Scd30, St: StoredReference, R: Reporter, C: Clock> SensorService<S, St, R, C> {
@@ -92,6 +96,7 @@ impl<S: Scd30, St: StoredReference, R: Reporter, C: Clock> SensorService<S, St, 
             trusted_readings: 0,
             consecutive_failures: 0,
             discard_next_reading: false,
+            broken_sensor_co2: config.broken_sensor_adjustment.then(BrokenSensorCo2::default),
         }
     }
 
@@ -203,13 +208,21 @@ impl<S: Scd30, St: StoredReference, R: Reporter, C: Clock> SensorService<S, St, 
                         // The sensor's first reading after any FRC is ~1 ppm garbage.
                         self.discard_next_reading = false;
                         log::info!("Discarding Post-FRC Transient ({:.1} ppm)", reading.co2_ppm);
+                        if let Some(adj) = &mut self.broken_sensor_co2 {
+                            adj.reset();
+                        }
                         return;
                     }
-                    self.reporter.report(&Report::from_reading(&reading));
+                    let reported = match &mut self.broken_sensor_co2 {
+                        Some(adj) => Reading { co2_ppm: adj.adjust(reading.co2_ppm), ..reading },
+                        None => reading,
+                    };
+                    self.reporter.report(&Report::from_reading(&reported));
                     log::info!(
-                        "CO2: {:.1} ppm, Temp: {:.2} C, Humidity: {:.2} %",
-                        reading.co2_ppm, reading.temperature_c, reading.humidity_pct
+                        "CO2: {:.1} ppm (raw {:.1}), Temp: {:.2} C, Humidity: {:.2} %",
+                        reported.co2_ppm, reading.co2_ppm, reading.temperature_c, reading.humidity_pct
                     );
+                    // Raw on purpose: the Stored Reference feeds the sensor's own FRC.
                     self.maybe_save_reference(reading.co2_ppm);
                 }
                 Err(e) => self.note_failure(&format!("Failed to read SCD30 measurement: {e:?}")),

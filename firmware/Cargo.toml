@@ -9,9 +9,12 @@ name = "firmware"
 harness = false # no test harness on target
 
 [features]
-default = ["self-heal"]
+default = ["self-heal", "broken-sensor-adjustment"]
 # Q30: re-assert FRC from the Stored Reference at boot (needed for this defective SCD30 unit).
 self-heal = []
+# Broken sensor adjustments: report CO2 ×50 (1 min average, 400 ppm floor) for this unit's ~1-2 %
+# sensitivity. Remove from `default` after replacing the SCD30 (README "Broken sensor adjustments").
+broken-sensor-adjustment = []
 
 [dependencies]
 anyhow = "1"

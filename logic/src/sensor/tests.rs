@@ -5,7 +5,7 @@ pub(super) type Svc = SensorService<FakeSensor, FakeStore, FakeReporter, FakeClo
 
 pub(super) fn svc(sensor: FakeSensor, stored: Option<i32>) -> Svc {
     SensorService::new(sensor, FakeStore::with(stored), FakeReporter::default(),
-                       FakeClock::default(), Config { self_heal_enabled: true })
+                       FakeClock::default(), Config { self_heal_enabled: true, broken_sensor_adjustment: false })
 }
 
 #[test]
@@ -68,7 +68,7 @@ fn boot_schedules_self_heal_only_for_plausible_reference() {
 #[test]
 fn boot_skips_self_heal_when_disabled_by_config() {
     let mut s = SensorService::new(FakeSensor::new(), FakeStore::with(Some(436)), FakeReporter::default(),
-                                   FakeClock::default(), Config { self_heal_enabled: false });
+                                   FakeClock::default(), Config { self_heal_enabled: false, broken_sensor_adjustment: false });
     s.boot();
     assert!(!s.self_heal_pending());
 }
@@ -115,6 +115,21 @@ fn trusted_session_saves_every_20th_plausible_reading_rounded() {
         s.tick(); // the first reading after the FRC is the discarded transient
     }
     assert_eq!(s.parts().1.saves, vec![613, 613]);
+}
+
+#[test]
+fn broken_sensor_adjustment_scales_reported_co2_but_saves_raw() {
+    let mut s = SensorService::new(FakeSensor::new(), FakeStore::with(Some(436)), FakeReporter::default(),
+                                   FakeClock::default(), Config { self_heal_enabled: true, broken_sensor_adjustment: true });
+    s.boot();
+    advance(&mut s, SELF_HEAL_WAIT_MS);
+    s.parts_mut().0.default_reading.co2_ppm = 460.0;
+    for _ in 0..21 {
+        s.tick(); // the first reading after the FRC is the discarded transient
+    }
+    let reported = s.parts().2.reports.last().unwrap().co2.0 * 1_000_000.0;
+    assert!((reported - 2175.0).abs() < 0.5, "reported {reported}");
+    assert_eq!(s.parts().1.saves, vec![460]);
 }
 
 #[test]
