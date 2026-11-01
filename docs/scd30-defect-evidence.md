@@ -131,9 +131,10 @@ over Zigbee by reading `msCO2.measuredValue` once a minute.
 | 14:11 (lid on ~60 min) | 458 | 74.2 | 22.3 |
 | 14:19 | 460 | 74.2 | 23.3 |
 | 14:27 (lid on ~75 min) | 460 | 75.3 | 23.3 |
+| 14:41 (lid on ~90 min) | 460 | 76.3 | 23.3 |
 
-- **Plateau, not a slow rise:** 458–460 ppm for the last 16 minutes, so the release was complete.
-- **Sealed:** humidity held at 74–75 %.
+- **Plateau, not a slow rise:** 458–460 ppm for the last 30 minutes, so the release was complete.
+- **Sealed:** humidity held at 74–76 %.
 - **Measured +35 ppm against +2,400–3,400 expected: ~1–1.5 % sensitivity**, matching the night and
   breath tests. Not yet checked: that the soda reacted fully (a splash of undiluted vinegar into
   the glass should still fizz). Even at half the dose it would be ~3 %.
