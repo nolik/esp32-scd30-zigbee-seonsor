@@ -22,7 +22,8 @@ fn boot_writes_only_settings_that_differ() {
 
 #[test]
 fn boot_restores_normal_interval_left_at_frc_interval() {
-    // Power cut during a Reference Recalibration leaves the sensor at 2 s (it persists in sensor NVM).
+    // Older firmware ran Reference Recalibration at 2 s; a power cut then left the sensor there
+    // (the interval persists in sensor NVM).
     let mut sensor = FakeSensor::new();
     sensor.settings.insert(Setting::MeasurementInterval, 2);
     let mut s = svc(sensor, None);
@@ -198,10 +199,9 @@ fn five_consecutive_failures_trigger_one_bus_recovery() {
     assert_eq!(s.parts().0.count(Call::RecoverBus), 1);
 }
 #[test]
-fn reference_recalibration_runs_sensirion_procedure_and_restores_normal_interval() {
+fn reference_recalibration_waits_two_minutes_at_normal_interval_then_frc() {
     let mut s = booted(None);
     assert!(s.request_reference_recalibration());
-    assert_eq!(s.parts().0.writes(), vec![(Setting::MeasurementInterval, 2)]);
 
     advance(&mut s, 60_000);
     s.tick(); // still settling: keeps reporting, no FRC yet
@@ -212,7 +212,8 @@ fn reference_recalibration_runs_sensirion_procedure_and_restores_normal_interval
     s.tick();
     let (sensor, store, reporter, _) = s.parts();
     assert_eq!(sensor.frcs(), vec![425]);
-    assert_eq!(sensor.writes(), vec![(Setting::MeasurementInterval, 2), (Setting::MeasurementInterval, 15)]);
+    // No interval switch: an FRC made at 2 s reads ~7 ppm low back at 15 s (ADR 0005).
+    assert!(sensor.writes().is_empty());
     assert_eq!(store.saves, vec![425]);
     assert_eq!(reporter.switch_resets, 1);
     assert_eq!(reporter.reports.len(), 2);
@@ -239,7 +240,9 @@ fn second_request_while_settling_is_ignored() {
     let mut s = booted(None);
     assert!(s.request_reference_recalibration());
     assert!(!s.request_reference_recalibration());
-    assert_eq!(s.parts().0.writes().len(), 1);
+    advance(&mut s, SELF_HEAL_WAIT_MS);
+    s.tick();
+    assert_eq!(s.parts().0.frcs(), vec![425]);
 }
 
 #[test]
@@ -254,22 +257,14 @@ fn reference_recalibration_supersedes_pending_self_heal() {
 }
 
 #[test]
-fn failed_reference_recalibration_still_restores_interval_and_resets_switch_without_saving() {
+fn failed_reference_recalibration_resets_switch_without_saving() {
     let mut s = booted(None);
     s.parts_mut().0.frc_error = Some("nack");
     s.request_reference_recalibration();
     advance(&mut s, SELF_HEAL_WAIT_MS);
     s.tick();
     let (sensor, store, reporter, _) = s.parts();
-    assert_eq!(sensor.writes().last(), Some(&(Setting::MeasurementInterval, 15)));
+    assert!(sensor.writes().is_empty());
     assert!(store.saves.is_empty());
     assert_eq!(reporter.switch_resets, 1);
-}
-
-#[test]
-fn interval_switch_failures_are_retried() {
-    let mut s = booted(None);
-    s.parts_mut().0.fail_writes = 2;
-    s.request_reference_recalibration();
-    assert_eq!(s.parts().0.writes(), vec![(Setting::MeasurementInterval, 2); 3]);
 }

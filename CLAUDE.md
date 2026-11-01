@@ -43,7 +43,7 @@ ssh use a small pyserial reader in `nix shell` (opening the port can reset the E
 - The crates are siblings (not a Cargo workspace): `firmware/.cargo/config.toml` forces the ESP
   target, so `logic` must stay buildable for the host.
 - Why it is built this way: `docs/rust-migration.md` (decision record, parity spec, soak log) and
-  `docs/adr/` (ZBOSS v1 via FFI, partition layout, Self-Heal 15 s vs Reference Recalibration 2 s).
+  `docs/adr/` (ZBOSS v1 via FFI, partition layout, router role, every FRC at 15 s).
   Why Self-Heal exists at all: `docs/scd30-defect-evidence.md` (this SCD30 loses FRC on power loss).
 
 ## Hard constraints
@@ -59,8 +59,9 @@ ssh use a small pyserial reader in `nix shell` (opening the port can reset the E
 - The Zigbee identity is a frozen contract with `esp32c6_scd30_converter.js` and
   `docs/z2m-baseline.json` (manufacturer `Nolik`, model `ESP32C6-SCD30-Zigbee`, endpoint 1, clusters,
   role router - ADR 0004: as an end device its plug parent dropped it every 64 min).
-- Self-Heal runs at the 15 s Measurement Interval; only Reference Recalibration switches to 2 s
-  (ADR 0003 — an interval change shifts CO2 ~7 ppm on this unit).
+- Every FRC (Self-Heal and Reference Recalibration) runs at the 15 s Measurement Interval, with no
+  interval switch (ADR 0005 — an interval change shifts CO2 ~7 ppm on this unit, ×50 after the
+  Broken sensor adjustments).
 - ZBOSS is pinned (`esp-zigbee-lib ==1.6.8`, `esp-zboss-lib ==1.6.4`); `firmware/Cargo.lock` and
   `firmware/components_esp32c6.lock` are the device-verified versions.
 - Ask before flashing firmware or triggering a Reference Recalibration (it recalibrates the real sensor).

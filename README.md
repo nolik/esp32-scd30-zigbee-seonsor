@@ -105,17 +105,17 @@ build with `--no-default-features` to disable Self-Heal.
 
 A fresh board (empty NVS) needs one **Reference Recalibration**: put the sensor at an open window
 (fresh outdoor air, still in Zigbee range) for a few minutes and flip the **Trigger Recalibration**
-switch in Home Assistant/Zigbee2MQTT. The firmware switches the sensor to a 2 s Measurement
-Interval, waits 2 minutes, applies FRC = 425 ppm (`FRC_REFERENCE_PPM`, drifts a few ppm per year),
-returns to 15 s, saves the Stored Reference and resets the switch to off.
+switch in Home Assistant/Zigbee2MQTT. The firmware waits 2 minutes at the normal 15 s Measurement
+Interval, applies FRC = 425 ppm (`FRC_REFERENCE_PPM`, drifts a few ppm per year), saves the Stored
+Reference and resets the switch to off.
 
 - ASC (automatic self-calibration) is kept **permanently off**: the boot-time FRC always overrides
   it on this unit. Interval (15 s), ASC (off) and temperature offset (320) are read at boot and
   written only if different.
-- Self-Heal stays at the 15 s interval while Reference Recalibration uses 2 s: any interval change
-  shifts CO2 by ~7 ppm on this unit, and a 2 s Self-Heal would push readings ~7 ppm lower on every
-  reboot ([ADR 0003](docs/adr/0003-self-heal-at-15s-reference-recalibration-at-2s.md)). After a
-  Reference Recalibration, 15 s readings sit ~7 ppm below 425 (constant, inside the ±30 ppm spec).
+- Both FRCs run at 15 s: any interval change shifts CO2 by ~7 ppm on this unit, so an FRC made at
+  2 s read ~418 back at 15 s - 350 ppm after the ×50 Broken sensor adjustments
+  ([ADR 0005](docs/adr/0005-reference-recalibration-at-15s.md), superseding ADR 0003). This departs
+  from Sensirion's 2 s FRC precondition.
 - The one ~1 ppm reading the sensor produces right after any FRC (Post-FRC Transient) is discarded.
 
 ### Broken sensor adjustments (temporary, remove after replacing the SCD30)
@@ -300,7 +300,6 @@ the (nice-to-have) lower-latency push behavior.
 | Constant | Purpose |
 |---|---|
 | `MEASUREMENT_INTERVAL_S` (15) | SCD30 Measurement Interval and the firmware's Report Period; also used by Self-Heal |
-| `FRC_INTERVAL_S` (2) | Measurement Interval for the 2 minutes before a Reference Recalibration |
 | `TEMPERATURE_OFFSET_CENTI_C` (320) | Sensor-side self-heating correction (ensured at boot); refine against a reference thermometer: `(SCD30 - reference) * 100 + current` after ~10 min |
 | `FRC_REFERENCE_PPM` (425) | Assumed outdoor CO2 for a Reference Recalibration - check periodically |
 | `SELF_HEAL_WAIT_MS` (120 000) | Measurements before any FRC (Sensirion: >= 2 min) |

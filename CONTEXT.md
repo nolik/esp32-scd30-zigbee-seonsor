@@ -38,8 +38,8 @@ _Avoid_: glitch, spike
 ### Timing
 
 **Measurement Interval**:
-How often the SCD30 itself takes a measurement. It is normally slow and is shortened only during a
-Reference Recalibration.
+How often the SCD30 itself takes a measurement. Always 15 s, including during every FRC: changing
+it shifts this unit's CO2 readings (ADR 0005).
 _Avoid_: polling interval, sampling rate, pulling interval
 
 **Report Period**:
