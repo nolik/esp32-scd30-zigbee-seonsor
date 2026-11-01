@@ -2,8 +2,6 @@
 
 /// Normal SCD30 Measurement Interval; also the firmware's Report Period.
 pub const MEASUREMENT_INTERVAL_S: u16 = 15;
-/// Measurement Interval for the 2 minutes before a Reference Recalibration (Sensirion procedure).
-pub const FRC_INTERVAL_S: u16 = 2;
 /// Sensor-side self-heating correction for 15 s operation (also corrects humidity).
 pub const TEMPERATURE_OFFSET_CENTI_C: u16 = 320;
 /// Assumed outdoor CO2 for a Reference Recalibration.
