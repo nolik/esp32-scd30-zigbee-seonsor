@@ -12,7 +12,7 @@ ADR 0003 accepted that 7 ppm as a constant offset inside the ±30 ppm spec. The 
 adjustments (README) scale every raw ppm by 50, so it became ~350 ppm: fresh air read 75 ppm and
 was clamped to the 400 ppm floor (2026-11-01, two recalibrations at an open window).
 
-Both FRCs now run at 15 s: Reference Recalibration waits 2 minutes at 15 s (8 readings) and applies
+Both FRCs now run at 15 s: Reference Recalibration waits 5 minutes at 15 s (20 readings) and applies
 FRC = 425 without changing the interval. Self-Heal already worked this way. The accepted cost: the
 procedure departs from Sensirion's 2 s FRC precondition. Boot still writes 15 s if the sensor is
 at another interval (a power cut during an older 2 s recalibration left it there).
