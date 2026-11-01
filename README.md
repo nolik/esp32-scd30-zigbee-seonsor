@@ -118,6 +118,37 @@ returns to 15 s, saves the Stored Reference and resets the switch to off.
   Reference Recalibration, 15 s readings sit ~7 ppm below 425 (constant, inside the ±30 ppm spec).
 - The one ~1 ppm reading the sensor produces right after any FRC (Post-FRC Transient) is discarded.
 
+### Broken sensor adjustments (temporary, remove after replacing the SCD30)
+
+The same unit also shows only **~1-2 % of a real CO2 change** (pot test 2026-11-01: +35 ppm raw
+for a ~+2,400-3,400 ppm release, see [`docs/scd30-defect-evidence.md`](docs/scd30-defect-evidence.md)).
+Until it is replaced, the firmware scales the **reported CO2 only** (`logic/src/broken_sensor.rs`):
+
+```
+reported = max(400, 425 + 50 × (mean of last 4 raw readings − 425))
+```
+
+| Broken sensor adjustments value | Value | Meaning |
+|---|---|---|
+| `BROKEN_SENSOR_CO2_GAIN` | 50 | 1 ppm raw change = 50 ppm reported |
+| `BROKEN_SENSOR_BASELINE_PPM` | 425 (`FRC_REFERENCE_PPM`) | Raw value that maps to itself |
+| `BROKEN_SENSOR_AVERAGE_READINGS` | 4 (1 min) | Moving average before scaling |
+| `BROKEN_SENSOR_FLOOR_PPM` | 400 | Lowest reported value |
+
+Treat the result as a rough "ventilate now" trend, not a measurement: errors are hundreds of ppm.
+Temperature, humidity, the Stored Reference and every FRC use the raw values, and the serial log
+prints both (`CO2: 2175.0 ppm (raw 460.0)`).
+
+**Back to normal values after the sensor replacement:**
+1. Remove `"broken-sensor-adjustment"` from `default` in `firmware/Cargo.toml`. A good sensor also
+   keeps its FRC, so building with `--no-default-features` turns off Self-Heal too.
+2. Build and flash (Steps 1 and 3), then do one Reference Recalibration for the new sensor.
+3. Optional cleanup: delete `logic/src/broken_sensor.rs`, the `broken_sensor_adjustment` config
+   field and its wiring in `logic/src/sensor/mod.rs`, and this section (search for
+   "Broken sensor adjustments").
+
+Nothing is stored in NVS or Zigbee for the adjustment, so reverting needs no re-pair.
+
 ---
 
 ## 5. Zigbee2MQTT external converter (NixOS)
@@ -277,3 +308,4 @@ the (nice-to-have) lower-latency push behavior.
 | `clamp_frc_reference` (400-2000) / `is_plausible` (300-10000) | FRC command range / sanity bounds for saving and re-applying |
 | `TEMP_PLACEHOLDER` (`0`) | Temperature value before the first reading - see Step 6; never `0x8000` |
 | Cargo feature `self-heal` (default on) | Disable with `--no-default-features` for a sensor that keeps its FRC |
+| Cargo feature `broken-sensor-adjustment` (default on) | Broken sensor adjustments: CO2 ×50 for the current low-sensitivity unit - see Step 4; turn off after replacing the sensor |
