@@ -260,7 +260,7 @@ impl<S: Scd30, St: StoredReference, R: Reporter, C: Clock> SensorService<S, St, 
         }
     }
 
-    /// Zigbee "Trigger Recalibration" switch turned on: 2 minutes of measurements, then FRC to
+    /// Zigbee "Trigger Recalibration" switch turned on: 5 minutes of measurements, then FRC to
     /// 425 ppm - at the normal 15 s interval, so the readings afterwards stay at 425 (ADR 0005).
     pub fn request_reference_recalibration(&mut self) -> bool {
         if self.recalibration != Recalibration::Idle {
@@ -274,8 +274,8 @@ impl<S: Scd30, St: StoredReference, R: Reporter, C: Clock> SensorService<S, St, 
             log::warn!("Reference Recalibration supersedes the pending Self-Heal");
             self.self_heal = SelfHeal::Inactive;
         }
-        log::warn!("Zigbee-triggered FRC: waiting 2 minutes for stable readings...");
-        self.recalibration = Recalibration::Settling { due_ms: self.clock.now_ms() + SELF_HEAL_WAIT_MS };
+        log::warn!("Zigbee-triggered FRC: waiting 5 minutes for stable readings...");
+        self.recalibration = Recalibration::Settling { due_ms: self.clock.now_ms() + REFERENCE_RECALIBRATION_WAIT_MS };
         true
     }
 

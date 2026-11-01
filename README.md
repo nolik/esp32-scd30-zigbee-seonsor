@@ -105,7 +105,7 @@ build with `--no-default-features` to disable Self-Heal.
 
 A fresh board (empty NVS) needs one **Reference Recalibration**: put the sensor at an open window
 (fresh outdoor air, still in Zigbee range) for a few minutes and flip the **Trigger Recalibration**
-switch in Home Assistant/Zigbee2MQTT. The firmware waits 2 minutes at the normal 15 s Measurement
+switch in Home Assistant/Zigbee2MQTT. The firmware waits 5 minutes at the normal 15 s Measurement
 Interval, applies FRC = 425 ppm (`FRC_REFERENCE_PPM`, drifts a few ppm per year), saves the Stored
 Reference and resets the switch to off.
 
@@ -302,7 +302,8 @@ the (nice-to-have) lower-latency push behavior.
 | `MEASUREMENT_INTERVAL_S` (15) | SCD30 Measurement Interval and the firmware's Report Period; also used by Self-Heal |
 | `TEMPERATURE_OFFSET_CENTI_C` (320) | Sensor-side self-heating correction (ensured at boot); refine against a reference thermometer: `(SCD30 - reference) * 100 + current` after ~10 min |
 | `FRC_REFERENCE_PPM` (425) | Assumed outdoor CO2 for a Reference Recalibration - check periodically |
-| `SELF_HEAL_WAIT_MS` (120 000) | Measurements before any FRC (Sensirion: >= 2 min) |
+| `SELF_HEAL_WAIT_MS` (120 000) | Measurements before the Self-Heal FRC (Sensirion: >= 2 min) |
+| `REFERENCE_RECALIBRATION_WAIT_MS` (300 000) | Measurements before the Reference Recalibration FRC: ~5 min for the sensor to take in the window air at 15 s |
 | `SAVE_EVERY_READINGS` (20, ~5 min) | How often a Trusted Session updates the Stored Reference |
 | `clamp_frc_reference` (400-2000) / `is_plausible` (300-10000) | FRC command range / sanity bounds for saving and re-applying |
 | `TEMP_PLACEHOLDER` (`0`) | Temperature value before the first reading - see Step 6; never `0x8000` |
